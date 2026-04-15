@@ -138,7 +138,7 @@ export default function ScanParamsForm({ params, displayUnit, onChange }: Props)
           <option value="" disabled>Select step size…</option>
           {PRESETS_UM.map((um) => (
             <option key={um} value={um}>
-              {fmtDisplay(um, displayUnit, opts.decimals)} {displayUnit}
+              {fmtDisplay(um, displayUnit, opts.decimals)}
             </option>
           ))}
         </select>

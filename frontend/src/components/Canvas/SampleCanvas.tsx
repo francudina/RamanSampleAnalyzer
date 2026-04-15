@@ -409,6 +409,7 @@ export default function SampleCanvas({
   const [size, setSize] = useState({ w: 800, h: 600 })
   const [vp, setVp] = useState<Viewport>({ left: -5000, top: -5000, scale: 0.04 })
   const [drawState, setDrawState] = useState<DrawState>({ mode: 'idle' })
+  const [panState, setPanState] = useState<{ startX: number; startY: number; vpLeft: number; vpTop: number } | null>(null)
   // Track live rect preview
   const [previewRect, setPreviewRect] = useState<{
     x: number; y: number; w: number; h: number
@@ -452,7 +453,7 @@ export default function SampleCanvas({
       const stage = e.target.getStage()!
       const pos = stage.getPointerPosition()!
       const cursorUm = pointerToUm(pos.x, pos.y, vp)
-      const factor = e.evt.deltaY < 0 ? 1.15 : 1 / 1.15
+      const factor = e.evt.deltaY < 0 ? 1.06 : 1 / 1.06
       setVp((v) => zoomViewport(v, cursorUm.x, cursorUm.y, factor))
     },
     [vp],
@@ -461,8 +462,16 @@ export default function SampleCanvas({
   const handleMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       if (e.evt.button !== 0) return
-      const um = getPointerUm(e)
+      const stage = e.target.getStage()!
+      const pos = stage.getPointerPosition()!
 
+      // Pan: select mode OR middle-button-like with space/alt held
+      if (drawMode === 'select' || e.evt.altKey) {
+        setPanState({ startX: pos.x, startY: pos.y, vpLeft: vp.left, vpTop: vp.top })
+        return
+      }
+
+      const um = getPointerUm(e)
       if (drawMode === 'rectangle') {
         setDrawState({ mode: 'drawing_rect', startX: um.x, startY: um.y })
         setPreviewRect({ x: um.x, y: um.y, w: 0, h: 0 })
@@ -474,7 +483,6 @@ export default function SampleCanvas({
           setDrawState({ mode: 'drawing_freeform', points: [um], preview: null })
         } else {
           const existing = drawState.points
-          // Close polygon if clicking near first point (within 10px)
           const first = existing[0]
           const dx = (um.x - first.x) * vp.scale
           const dy = (um.y - first.y) * vp.scale
@@ -493,11 +501,21 @@ export default function SampleCanvas({
         }
       }
     },
-    [drawMode, drawState, getPointerUm, onShapeChange, vp.scale],
+    [drawMode, drawState, getPointerUm, onShapeChange, vp],
   )
 
   const handleMouseMove = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      // Pan
+      if (panState) {
+        const stage = e.target.getStage()!
+        const pos = stage.getPointerPosition()!
+        const dx = (pos.x - panState.startX) / vp.scale
+        const dy = (pos.y - panState.startY) / vp.scale
+        setVp((v) => ({ ...v, left: panState.vpLeft - dx, top: panState.vpTop - dy }))
+        return
+      }
+
       const um = getPointerUm(e)
       if (drawState.mode === 'drawing_rect') {
         const w = um.x - drawState.startX
@@ -520,11 +538,15 @@ export default function SampleCanvas({
         setDrawState({ ...drawState, preview: um })
       }
     },
-    [drawState, getPointerUm],
+    [drawState, getPointerUm, panState, vp.scale],
   )
 
   const handleMouseUp = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      if (panState) {
+        setPanState(null)
+        return
+      }
       const um = getPointerUm(e)
       if (drawState.mode === 'drawing_rect') {
         const w = Math.abs(um.x - drawState.startX)
@@ -556,7 +578,7 @@ export default function SampleCanvas({
         setPreviewCircle(null)
       }
     },
-    [drawState, getPointerUm, onShapeChange],
+    [drawState, getPointerUm, onShapeChange, panState],
   )
 
   const handleDblClick = useCallback(
@@ -576,8 +598,8 @@ export default function SampleCanvas({
   const toY = (um: number) => umToPixel(um, vp.top, vp.scale)
 
   const cursor =
-    drawMode === 'select' ? 'default'
-    : drawMode === 'freeform' ? 'crosshair'
+    panState ? 'grabbing'
+    : drawMode === 'select' ? 'grab'
     : 'crosshair'
 
   return (
@@ -604,6 +626,25 @@ export default function SampleCanvas({
             points={[0, toY(0), size.w, toY(0)]}
             stroke={darkMode ? '#444' : '#d1d5db'}
             strokeWidth={1.5}
+          />
+          {/* Axis labels */}
+          <Text
+            x={toX(0) - 18}
+            y={4}
+            text="Y"
+            fontSize={14}
+            fontStyle="bold"
+            fill={darkMode ? '#555' : '#9ca3af'}
+            listening={false}
+          />
+          <Text
+            x={size.w - 20}
+            y={toY(0) - 18}
+            text="X"
+            fontSize={14}
+            fontStyle="bold"
+            fill={darkMode ? '#555' : '#9ca3af'}
+            listening={false}
           />
           {/* Origin dot */}
           <Circle x={toX(0)} y={toY(0)} radius={3} fill={darkMode ? '#555' : '#6b7280'} />

@@ -131,7 +131,7 @@ export default function StageSettings({ constraints, displayUnit, onChange }: Pr
             { wUm: mmToUm(50), hUm: mmToUm(50) },
           ].map(({ wUm, hUm }) => (
             <option key={wUm} value={`${wUm},${hUm}`}>
-              {fmtDisplay(wUm, displayUnit, 0)} × {fmtDisplay(hUm, displayUnit, 0)} {displayUnit}
+              {fmtDisplay(wUm, displayUnit, 0)} × {fmtDisplay(hUm, displayUnit, 0)}
             </option>
           ))}
         </select>

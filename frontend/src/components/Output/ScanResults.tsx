@@ -106,7 +106,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error }: P
           {result.warnings.map((w, i) => (
             <div
               key={i}
-              className="flex gap-2 text-[10px] rounded border border-amber-800/50 bg-amber-950/30 p-2 text-amber-400"
+              className="flex gap-2 text-[10px] rounded border border-amber-400 bg-amber-50 p-2 text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-400"
             >
               <span>⚠</span>
               <span>{w}</span>
