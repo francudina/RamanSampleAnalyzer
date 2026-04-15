@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ScanResult } from '../../types/scan'
 import {
   type DisplayUnit,
@@ -55,6 +55,13 @@ function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
 
 export default function ScanResults({ result, displayUnit, isLoading, error, focusMode, hoveredPass, onPassHover }: Props) {
   const [copied, setCopied] = useState(false)
+  const passRefs = useRef<Record<number, HTMLDivElement | null>>({})
+
+  useEffect(() => {
+    if (hoveredPass === null) return
+    const el = passRefs.current[hoveredPass]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [hoveredPass])
 
   const handleCopy = async () => {
     if (!result) return
@@ -128,6 +135,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
         return (
           <div
             key={pass.pass_number}
+            ref={(el) => { passRefs.current[pass.pass_number] = el }}
             className="rounded border overflow-hidden transition-opacity"
             style={{
               borderColor: color + (isHovered ? 'aa' : '44'),

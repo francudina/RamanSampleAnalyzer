@@ -468,6 +468,20 @@ export default function SampleCanvas({
     }
   }, [shape, size.w, size.h])
 
+  // ESC cancels active drawing
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDrawState({ mode: 'idle' })
+        setPreviewRect(null)
+        setPreviewCircle(null)
+        setPanState(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const getPointerUm = useCallback(
     (e: KonvaEventObject<MouseEvent>): Point => {
       const stage = e.target.getStage()!

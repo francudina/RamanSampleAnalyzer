@@ -135,6 +135,7 @@ export default function App() {
     try {
       const result = await generateScan({ shape, scan_params: scanParams, stage })
       setScanResult(result)
+      setDrawMode('select')
     } catch (err: unknown) {
       const msg =
         err instanceof Error
