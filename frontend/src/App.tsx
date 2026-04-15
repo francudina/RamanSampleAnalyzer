@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { generateScan } from './api/scanApi'
+import { generateScanGrid } from './utils/scanGenerator'
 import SampleCanvas from './components/Canvas/SampleCanvas'
 import ShapeControls from './components/Controls/ShapeControls'
 import ScanParamsForm from './components/Controls/ScanParamsForm'
@@ -123,7 +123,7 @@ export default function App() {
     setHasGenerated(false)
   }, [])
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     if (!shape) {
       setError('Please define a sample shape first.')
       setHasGenerated(true)
@@ -133,17 +133,11 @@ export default function App() {
     setError(null)
     setHasGenerated(true)
     try {
-      const result = await generateScan({ shape, scan_params: scanParams, stage })
+      const result = generateScanGrid(shape, scanParams, stage)
       setScanResult(result)
       setDrawMode('select')
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'object' && err !== null && 'response' in err
-          ? String((err as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? err)
-          : String(err)
-      setError(msg)
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setIsLoading(false)
     }
