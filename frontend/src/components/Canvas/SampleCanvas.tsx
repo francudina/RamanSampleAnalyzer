@@ -555,6 +555,10 @@ export default function SampleCanvas({
   } | null>(null)
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null)
 
+  // Refs for touch gesture tracking (refs = no stale-closure issues in touch handlers)
+  const pinchRef = useRef<{ dist: number; midX: number; midY: number } | null>(null)
+  const lastTapRef = useRef<number>(0)
+
   // Responsive canvas sizing
   useEffect(() => {
     const obs = new ResizeObserver((entries) => {
@@ -589,15 +593,6 @@ export default function SampleCanvas({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const getPointerUm = useCallback(
-    (e: KonvaEventObject<MouseEvent>): Point => {
-      const stage = e.target.getStage()!
-      const pos = stage.getPointerPosition()!
-      return pointerToUm(pos.x, pos.y, vp)
-    },
-    [vp],
-  )
-
   const handleWheel = useCallback(
     (e: KonvaEventObject<WheelEvent>) => {
       e.evt.preventDefault()
@@ -610,19 +605,15 @@ export default function SampleCanvas({
     [vp],
   )
 
-  const handleMouseDown = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      if (e.evt.button !== 0) return
-      const stage = e.target.getStage()!
-      const pos = stage.getPointerPosition()!
+  // ── Core pointer-position handlers (shared by mouse and touch) ──────────────
 
-      // Pan: select mode OR middle-button-like with space/alt held
-      if (drawMode === 'select' || e.evt.altKey) {
+  const handlePointerDown = useCallback(
+    (pos: { x: number; y: number }, altKey = false) => {
+      if (drawMode === 'select' || altKey) {
         setPanState({ startX: pos.x, startY: pos.y, vpLeft: vp.left, vpTop: vp.top })
         return
       }
-
-      const um = getPointerUm(e)
+      const um = pointerToUm(pos.x, pos.y, vp)
       if (drawMode === 'rectangle') {
         setDrawState({ mode: 'drawing_rect', startX: um.x, startY: um.y })
         setPreviewRect({ x: um.x, y: um.y, w: 0, h: 0 })
@@ -638,29 +629,19 @@ export default function SampleCanvas({
           const dx = (um.x - first.x) * vp.scale
           const dy = (um.y - first.y) * vp.scale
           if (existing.length >= 3 && Math.sqrt(dx * dx + dy * dy) < 12) {
-            onShapeChange({
-              type: 'freeform',
-              freeform: { points: existing },
-            })
+            onShapeChange({ type: 'freeform', freeform: { points: existing } })
             setDrawState({ mode: 'idle' })
           } else {
-            setDrawState({
-              ...drawState,
-              points: [...existing, um],
-            })
+            setDrawState({ ...drawState, points: [...existing, um] })
           }
         }
       }
     },
-    [drawMode, drawState, getPointerUm, onShapeChange, vp],
+    [drawMode, drawState, onShapeChange, vp],
   )
 
-  const handleMouseMove = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
-      const stage = e.target.getStage()!
-      const pos = stage.getPointerPosition()!
-
-      // Pan
+  const handlePointerMove = useCallback(
+    (pos: { x: number; y: number }) => {
       if (panState) {
         const dx = (pos.x - panState.startX) / vp.scale
         const dy = (pos.y - panState.startY) / vp.scale
@@ -668,9 +649,7 @@ export default function SampleCanvas({
         setHoverInfo(null)
         return
       }
-
       const um = pointerToUm(pos.x, pos.y, vp)
-
       if (drawState.mode === 'drawing_rect') {
         const w = um.x - drawState.startX
         const h = um.y - drawState.startY
@@ -684,22 +663,16 @@ export default function SampleCanvas({
       } else if (drawState.mode === 'drawing_circle') {
         const dx = um.x - drawState.cx
         const dy = um.y - drawState.cy
-        setPreviewCircle({
-          cx: drawState.cx,
-          cy: drawState.cy,
-          r: Math.sqrt(dx * dx + dy * dy),
-        })
+        setPreviewCircle({ cx: drawState.cx, cy: drawState.cy, r: Math.sqrt(dx * dx + dy * dy) })
         setHoverInfo(null)
       } else if (drawState.mode === 'drawing_freeform') {
         setDrawState({ ...drawState, preview: um })
         setHoverInfo(null)
       } else if (shape?.type === 'freeform' && shape.freeform) {
-        // Hover detection over freeform vertices and edges
         const pts = shape.freeform.points
         const VERTEX_THRESHOLD = 10
         const EDGE_THRESHOLD = 6
         let found = false
-
         for (let i = 0; i < pts.length; i++) {
           const vx = umToPixel(pts[i].x, vp.left, vp.scale)
           const vy = umToPixel(pts[i].y, vp.top, vp.scale)
@@ -709,7 +682,6 @@ export default function SampleCanvas({
             break
           }
         }
-
         if (!found) {
           for (let i = 0; i < pts.length; i++) {
             const j = (i + 1) % pts.length
@@ -720,25 +692,16 @@ export default function SampleCanvas({
             if (pointToSegDist(pos.x, pos.y, ax, ay, bx, by) < EDGE_THRESHOLD) {
               const ddx = pts[j].x - pts[i].x
               const ddy = pts[j].y - pts[i].y
-              setHoverInfo({
-                kind: 'edge',
-                fromIdx: i,
-                toIdx: j,
-                px: pos.x,
-                py: pos.y,
-                length: Math.sqrt(ddx * ddx + ddy * ddy),
-              })
+              setHoverInfo({ kind: 'edge', fromIdx: i, toIdx: j, px: pos.x, py: pos.y, length: Math.sqrt(ddx * ddx + ddy * ddy) })
               found = true
               break
             }
           }
         }
-
         if (!found && pointInPolygon(um.x, um.y, pts)) {
           setHoverInfo({ kind: 'surface', surfaceIndex: 0, px: pos.x, py: pos.y, areaUm2: polygonAreaUm2(pts) })
           found = true
         }
-
         if (!found) setHoverInfo(null)
       } else {
         setHoverInfo(null)
@@ -747,25 +710,20 @@ export default function SampleCanvas({
     [drawState, panState, shape, vp],
   )
 
-  const handleMouseUp = useCallback(
-    (e: KonvaEventObject<MouseEvent>) => {
+  const handlePointerUp = useCallback(
+    (pos: { x: number; y: number }) => {
       if (panState) {
         setPanState(null)
         return
       }
-      const um = getPointerUm(e)
+      const um = pointerToUm(pos.x, pos.y, vp)
       if (drawState.mode === 'drawing_rect') {
         const w = Math.abs(um.x - drawState.startX)
         const h = Math.abs(um.y - drawState.startY)
         if (w > 1 && h > 1) {
           onShapeChange({
             type: 'rectangle',
-            rect: {
-              x: Math.min(drawState.startX, um.x),
-              y: Math.min(drawState.startY, um.y),
-              width: w,
-              height: h,
-            },
+            rect: { x: Math.min(drawState.startX, um.x), y: Math.min(drawState.startY, um.y), width: w, height: h },
           })
         }
         setDrawState({ mode: 'idle' })
@@ -775,29 +733,133 @@ export default function SampleCanvas({
         const dy = um.y - drawState.cy
         const r = Math.sqrt(dx * dx + dy * dy)
         if (r > 1) {
-          onShapeChange({
-            type: 'circle',
-            circle: { cx: drawState.cx, cy: drawState.cy, radius: r },
-          })
+          onShapeChange({ type: 'circle', circle: { cx: drawState.cx, cy: drawState.cy, radius: r } })
         }
         setDrawState({ mode: 'idle' })
         setPreviewCircle(null)
       }
     },
-    [drawState, getPointerUm, onShapeChange, panState],
+    [drawState, onShapeChange, panState, vp],
+  )
+
+  // ── Mouse wrappers ───────────────────────────────────────────────────────────
+
+  const handleMouseDown = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      if (e.evt.button !== 0) return
+      const pos = e.target.getStage()!.getPointerPosition()!
+      handlePointerDown(pos, e.evt.altKey)
+    },
+    [handlePointerDown],
+  )
+
+  const handleMouseMove = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const pos = e.target.getStage()!.getPointerPosition()!
+      handlePointerMove(pos)
+    },
+    [handlePointerMove],
+  )
+
+  const handleMouseUp = useCallback(
+    (e: KonvaEventObject<MouseEvent>) => {
+      const pos = e.target.getStage()!.getPointerPosition()!
+      handlePointerUp(pos)
+    },
+    [handlePointerUp],
   )
 
   const handleDblClick = useCallback(
     (_e: KonvaEventObject<MouseEvent>) => {
       if (drawState.mode === 'drawing_freeform' && drawState.points.length >= 3) {
-        onShapeChange({
-          type: 'freeform',
-          freeform: { points: drawState.points },
-        })
+        onShapeChange({ type: 'freeform', freeform: { points: drawState.points } })
         setDrawState({ mode: 'idle' })
       }
     },
     [drawState, onShapeChange],
+  )
+
+  // ── Touch handlers ───────────────────────────────────────────────────────────
+
+  const handleTouchStart = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      const touches = e.evt.touches
+      if (touches.length === 2) {
+        // Two fingers: begin pinch — cancel any active pan/draw
+        setPanState(null)
+        const t1 = touches[0], t2 = touches[1]
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (!rect) return
+        pinchRef.current = {
+          dist: Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY),
+          midX: (t1.clientX + t2.clientX) / 2 - rect.left,
+          midY: (t1.clientY + t2.clientY) / 2 - rect.top,
+        }
+        return
+      }
+      if (touches.length === 1) {
+        const pos = e.target.getStage()!.getPointerPosition()!
+        // Double-tap to close freeform polygon
+        const now = Date.now()
+        if (
+          now - lastTapRef.current < 300 &&
+          drawState.mode === 'drawing_freeform' &&
+          drawState.points.length >= 3
+        ) {
+          onShapeChange({ type: 'freeform', freeform: { points: drawState.points } })
+          setDrawState({ mode: 'idle' })
+          lastTapRef.current = 0
+          return
+        }
+        lastTapRef.current = now
+        handlePointerDown(pos)
+      }
+    },
+    [drawState, handlePointerDown, onShapeChange],
+  )
+
+  const handleTouchMove = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      const touches = e.evt.touches
+      if (touches.length === 2 && pinchRef.current) {
+        e.evt.preventDefault()
+        const t1 = touches[0], t2 = touches[1]
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (!rect) return
+        const newDist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY)
+        const newMidX = (t1.clientX + t2.clientX) / 2 - rect.left
+        const newMidY = (t1.clientY + t2.clientY) / 2 - rect.top
+        const { dist: oldDist, midX: oldMidX, midY: oldMidY } = pinchRef.current
+        const scaleFactor = newDist / oldDist
+        setVp((v) => {
+          const midUm = pointerToUm(newMidX, newMidY, v)
+          const zoomed = zoomViewport(v, midUm.x, midUm.y, scaleFactor)
+          const dx = (newMidX - oldMidX) / zoomed.scale
+          const dy = (newMidY - oldMidY) / zoomed.scale
+          return { ...zoomed, left: zoomed.left - dx, top: zoomed.top - dy }
+        })
+        pinchRef.current = { dist: newDist, midX: newMidX, midY: newMidY }
+        return
+      }
+      if (touches.length === 1 && !pinchRef.current) {
+        const pos = e.target.getStage()!.getPointerPosition()!
+        handlePointerMove(pos)
+      }
+    },
+    [handlePointerMove],
+  )
+
+  const handleTouchEnd = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      if (pinchRef.current) {
+        pinchRef.current = null
+        return
+      }
+      const stage = e.target.getStage()
+      const pos = stage?.getPointerPosition()
+      if (pos) handlePointerUp(pos)
+    },
+    [handlePointerUp],
   )
 
   const toX = (um: number) => umToPixel(um, vp.left, vp.scale)
@@ -809,7 +871,7 @@ export default function SampleCanvas({
     : 'crosshair'
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-white dark:bg-[#1a1a1a]" style={{ cursor }}>
+    <div ref={containerRef} className="relative w-full h-full bg-white dark:bg-[#1a1a1a]" style={{ cursor, touchAction: 'none' }}>
       <Stage
         width={size.w}
         height={size.h}
@@ -819,6 +881,9 @@ export default function SampleCanvas({
         onMouseUp={handleMouseUp}
         onDblClick={handleDblClick}
         onMouseLeave={() => setHoverInfo(null)}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         {/* Background + coordinate grid (not transformed — drawn in pixel space) */}
         <Layer listening={false}>
