@@ -75,6 +75,16 @@ export function fmtUm(um: number, decimals = 3): string {
   return `${um.toFixed(decimals)} µm`
 }
 
+/** Format µm² in the current display unit's area (unit²) */
+export function fmtAreaDisplay(um2: number, unit: DisplayUnit): string {
+  switch (unit) {
+    case 'nm': return `${(um2 * 1e6).toFixed(1)} nm²`
+    case 'µm': return `${um2.toFixed(2)} µm²`
+    case 'mm': return `${(um2 / 1e6).toFixed(4)} mm²`
+    case 'cm': return `${(um2 / 1e8).toFixed(6)} cm²`
+  }
+}
+
 /** Format mm² */
 export function fmtMm2(mm2: number): string {
   if (mm2 >= 100) return `${(mm2 / 100).toFixed(3)} cm²`

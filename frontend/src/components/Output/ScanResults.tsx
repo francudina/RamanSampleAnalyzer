@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ScanResult } from '../../types/scan'
+import type { ScanPass, ScanResult } from '../../types/scan'
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
@@ -55,6 +55,7 @@ function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
 
 export default function ScanResults({ result, displayUnit, isLoading, error, focusMode, hoveredPass, onPassHover }: Props) {
   const [copied, setCopied] = useState(false)
+  const [detailPass, setDetailPass] = useState<ScanPass | null>(null)
   const passRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
   useEffect(() => {
@@ -149,7 +150,18 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
               style={{ background: color + '18', color }}
             >
               <span>Pass {pass.pass_number}</span>
-              <span className="font-mono">{pass.nx} × {pass.ny} = {pass.total_points.toLocaleString()} pts</span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono">{pass.nx} × {pass.ny} = {pass.total_points.toLocaleString()} pts</span>
+                <button
+                  onClick={() => setDetailPass(pass)}
+                  className="text-[9px] px-1.5 py-0.5 rounded border font-semibold uppercase tracking-wide transition-colors"
+                  style={{ borderColor: color + '88', color, background: color + '18' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = color + '33')}
+                  onMouseLeave={e => (e.currentTarget.style.background = color + '18')}
+                >
+                  Details
+                </button>
+              </div>
             </div>
             <div className="px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-2 bg-white dark:bg-[#252525]">
               {[
@@ -200,6 +212,60 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
       >
         Print / Export
       </button>
+
+      {/* Pass dots detail modal */}
+      {detailPass && (() => {
+        const idx = result!.passes.indexOf(detailPass)
+        const color = PASS_COLORS[idx % PASS_COLORS.length]
+        const d = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!.decimals
+        const fmt = (um: number) => fmtDisplay(um, displayUnit, d)
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={() => setDetailPass(null)}
+          >
+            <div
+              className="relative bg-white dark:bg-[#1e1e1e] rounded-lg shadow-2xl border border-gray-200 dark:border-[#333] w-[420px] max-h-[70vh] flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div
+                className="px-4 py-3 flex items-center justify-between rounded-t-lg border-b border-gray-200 dark:border-[#333]"
+                style={{ background: color + '18' }}
+              >
+                <div>
+                  <span className="text-sm font-bold" style={{ color }}>Pass {detailPass.pass_number}</span>
+                  <span className="ml-2 text-xs text-gray-400 dark:text-[#888]">
+                    {detailPass.total_points.toLocaleString()} points
+                  </span>
+                </div>
+                <button
+                  onClick={() => setDetailPass(null)}
+                  className="text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa] text-lg leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              {/* Column headers */}
+              <div className="px-4 py-1.5 grid grid-cols-3 gap-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-[#666] border-b border-gray-100 dark:border-[#2a2a2a]">
+                <span>#</span>
+                <span>X</span>
+                <span>Y</span>
+              </div>
+              {/* Dots list */}
+              <div className="overflow-y-auto flex-1 px-4 py-1 divide-y divide-gray-100 dark:divide-[#2a2a2a]">
+                {detailPass.grid_points.map((pt, i) => (
+                  <div key={i} className="grid grid-cols-3 gap-2 py-1 text-xs font-mono text-gray-700 dark:text-[#ccc]">
+                    <span className="text-gray-400 dark:text-[#555]">{i + 1}</span>
+                    <span>{fmt(pt.x)}</span>
+                    <span>{fmt(pt.y)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

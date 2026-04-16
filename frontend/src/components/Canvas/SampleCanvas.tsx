@@ -18,15 +18,42 @@ import type {
 } from '../../types/scan'
 import {
   fitViewport,
+  pointInPolygon,
   pointerToUm,
   shapeBoundingBox,
   umToPixel,
   zoomViewport,
 } from '../../utils/geometry'
-import { type DisplayUnit, fmtDisplay } from '../../utils/units'
+import { type DisplayUnit, fmtAreaDisplay, fmtDisplay } from '../../utils/units'
 
 // Pass colours for multi-pass scans
 const PASS_COLORS = ['#3b82f6', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#06b6d4']
+
+// ── Polygon area (shoelace, µm²) ──────────────────────────────────────────────
+
+function polygonAreaUm2(pts: Point[]): number {
+  let area = 0
+  const n = pts.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+  }
+  return Math.abs(area) / 2
+}
+
+// ── Point-to-segment distance (pixels) ────────────────────────────────────────
+
+function pointToSegDist(
+  px: number, py: number,
+  ax: number, ay: number,
+  bx: number, by: number,
+): number {
+  const dx = bx - ax, dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2)
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+  return Math.sqrt((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2)
+}
 
 interface Props {
   shape: SampleShape | null
@@ -152,30 +179,47 @@ function ShapeRenderer({
           strokeWidth={1.5}
           listening={false}
         />
-        {/* Segment lines with labels */}
+        {/* Segment labels — parallel to each edge */}
         {pts.map((p, i) => {
           const next = pts[(i + 1) % pts.length]
-          const mx = (toX(p.x) + toX(next.x)) / 2
-          const my = (toY(p.y) + toY(next.y)) / 2
-          const nextLabel = i < pts.length - 1 ? `P${i + 2}` : 'P1'
+          const x1 = toX(p.x), y1 = toY(p.y)
+          const x2 = toX(next.x), y2 = toY(next.y)
+          const mx = (x1 + x2) / 2
+          const my = (y1 + y2) / 2
+          const edgeDx = x2 - x1
+          const edgeDy = y2 - y1
+          const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
+          // Normalised direction
+          const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
+          const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
+          // Perpendicular: choose whichever half-space points screen-upward
+          let perpX = -ny
+          let perpY = nx
+          if (perpY > 0 || (perpY === 0 && perpX < 0)) { perpX = -perpX; perpY = -perpY }
+          // Text rotation — normalised to (-90°, 90°] so text is never upside-down
+          let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
+          if (angle > 90) angle -= 180
+          else if (angle <= -90) angle += 180
+
+          const nextIdx = (i + 1) % pts.length
+          const label = `P${i + 1}–P${nextIdx + 1}`
+          const OFFSET = 12
+          const estW = label.length * 5.2
+
           return (
-            <React.Fragment key={`seg-${i}`}>
-              <Line
-                points={[toX(p.x), toY(p.y), toX(next.x), toY(next.y)]}
-                stroke="#2563eb"
-                strokeWidth={1.5}
-                listening={false}
-              />
-              <Text
-                x={mx + 3}
-                y={my - 9}
-                text={`P${i + 1}–${nextLabel}`}
-                fontSize={9}
-                fill="#2563eb"
-                opacity={0.7}
-                listening={false}
-              />
-            </React.Fragment>
+            <Text
+              key={`seg-lbl-${i}`}
+              x={mx + perpX * OFFSET}
+              y={my + perpY * OFFSET}
+              text={label}
+              fontSize={9}
+              fill="#2563eb"
+              opacity={0.7}
+              rotation={angle}
+              offsetX={estW / 2}
+              offsetY={4.5}
+              listening={false}
+            />
           )
         })}
         {/* Vertex dots + labels */}
@@ -422,6 +466,13 @@ function DrawingPreview({
   return null
 }
 
+// ── Hover info type ────────────────────────────────────────────────────────────
+
+type HoverInfo =
+  | { kind: 'vertex'; index: number; px: number; py: number; umX: number; umY: number }
+  | { kind: 'edge'; fromIdx: number; toIdx: number; px: number; py: number; length: number }
+  | { kind: 'surface'; surfaceIndex: number; px: number; py: number; areaUm2: number }
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function SampleCanvas({
@@ -440,13 +491,13 @@ export default function SampleCanvas({
   const [vp, setVp] = useState<Viewport>({ left: -5000, top: -5000, scale: 0.04 })
   const [drawState, setDrawState] = useState<DrawState>({ mode: 'idle' })
   const [panState, setPanState] = useState<{ startX: number; startY: number; vpLeft: number; vpTop: number } | null>(null)
-  // Track live rect preview
   const [previewRect, setPreviewRect] = useState<{
     x: number; y: number; w: number; h: number
   } | null>(null)
   const [previewCircle, setPreviewCircle] = useState<{
     cx: number; cy: number; r: number
   } | null>(null)
+  const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null)
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -550,17 +601,20 @@ export default function SampleCanvas({
 
   const handleMouseMove = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      const stage = e.target.getStage()!
+      const pos = stage.getPointerPosition()!
+
       // Pan
       if (panState) {
-        const stage = e.target.getStage()!
-        const pos = stage.getPointerPosition()!
         const dx = (pos.x - panState.startX) / vp.scale
         const dy = (pos.y - panState.startY) / vp.scale
         setVp((v) => ({ ...v, left: panState.vpLeft - dx, top: panState.vpTop - dy }))
+        setHoverInfo(null)
         return
       }
 
-      const um = getPointerUm(e)
+      const um = pointerToUm(pos.x, pos.y, vp)
+
       if (drawState.mode === 'drawing_rect') {
         const w = um.x - drawState.startX
         const h = um.y - drawState.startY
@@ -570,6 +624,7 @@ export default function SampleCanvas({
           w: Math.abs(w),
           h: Math.abs(h),
         })
+        setHoverInfo(null)
       } else if (drawState.mode === 'drawing_circle') {
         const dx = um.x - drawState.cx
         const dy = um.y - drawState.cy
@@ -578,11 +633,62 @@ export default function SampleCanvas({
           cy: drawState.cy,
           r: Math.sqrt(dx * dx + dy * dy),
         })
+        setHoverInfo(null)
       } else if (drawState.mode === 'drawing_freeform') {
         setDrawState({ ...drawState, preview: um })
+        setHoverInfo(null)
+      } else if (shape?.type === 'freeform' && shape.freeform) {
+        // Hover detection over freeform vertices and edges
+        const pts = shape.freeform.points
+        const VERTEX_THRESHOLD = 10
+        const EDGE_THRESHOLD = 6
+        let found = false
+
+        for (let i = 0; i < pts.length; i++) {
+          const vx = umToPixel(pts[i].x, vp.left, vp.scale)
+          const vy = umToPixel(pts[i].y, vp.top, vp.scale)
+          if (Math.sqrt((pos.x - vx) ** 2 + (pos.y - vy) ** 2) < VERTEX_THRESHOLD) {
+            setHoverInfo({ kind: 'vertex', index: i, px: pos.x, py: pos.y, umX: pts[i].x, umY: pts[i].y })
+            found = true
+            break
+          }
+        }
+
+        if (!found) {
+          for (let i = 0; i < pts.length; i++) {
+            const j = (i + 1) % pts.length
+            const ax = umToPixel(pts[i].x, vp.left, vp.scale)
+            const ay = umToPixel(pts[i].y, vp.top, vp.scale)
+            const bx = umToPixel(pts[j].x, vp.left, vp.scale)
+            const by = umToPixel(pts[j].y, vp.top, vp.scale)
+            if (pointToSegDist(pos.x, pos.y, ax, ay, bx, by) < EDGE_THRESHOLD) {
+              const ddx = pts[j].x - pts[i].x
+              const ddy = pts[j].y - pts[i].y
+              setHoverInfo({
+                kind: 'edge',
+                fromIdx: i,
+                toIdx: j,
+                px: pos.x,
+                py: pos.y,
+                length: Math.sqrt(ddx * ddx + ddy * ddy),
+              })
+              found = true
+              break
+            }
+          }
+        }
+
+        if (!found && pointInPolygon(um.x, um.y, pts)) {
+          setHoverInfo({ kind: 'surface', surfaceIndex: 0, px: pos.x, py: pos.y, areaUm2: polygonAreaUm2(pts) })
+          found = true
+        }
+
+        if (!found) setHoverInfo(null)
+      } else {
+        setHoverInfo(null)
       }
     },
-    [drawState, getPointerUm, panState, vp.scale],
+    [drawState, panState, shape, vp],
   )
 
   const handleMouseUp = useCallback(
@@ -647,7 +753,7 @@ export default function SampleCanvas({
     : 'crosshair'
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-white dark:bg-[#1a1a1a]" style={{ cursor }}>
+    <div ref={containerRef} className="relative w-full h-full bg-white dark:bg-[#1a1a1a]" style={{ cursor }}>
       <Stage
         width={size.w}
         height={size.h}
@@ -656,6 +762,7 @@ export default function SampleCanvas({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onDblClick={handleDblClick}
+        onMouseLeave={() => setHoverInfo(null)}
       >
         {/* Background + coordinate grid (not transformed — drawn in pixel space) */}
         <Layer listening={false}>
@@ -739,6 +846,32 @@ export default function SampleCanvas({
           <DrawingPreview drawState={drawState} vp={vp} />
         </Layer>
       </Stage>
+
+      {/* Hover tooltip */}
+      {hoverInfo && (
+        <div
+          className="absolute pointer-events-none z-10 rounded shadow-lg text-xs leading-snug px-2 py-1.5 bg-gray-900/90 text-white dark:bg-gray-100/90 dark:text-gray-900"
+          style={{ left: hoverInfo.px + 14, top: hoverInfo.py - 10 }}
+        >
+          {hoverInfo.kind === 'vertex' && (
+            <span>
+              P{hoverInfo.index + 1}&nbsp;({fmtDisplay(hoverInfo.umX, displayUnit, 2)},&nbsp;{fmtDisplay(hoverInfo.umY, displayUnit, 2)})
+            </span>
+          )}
+          {hoverInfo.kind === 'edge' && (
+            <>
+              <div className="font-semibold">P{hoverInfo.fromIdx + 1}–P{hoverInfo.toIdx + 1}</div>
+              <div className="opacity-80">Length:&nbsp;{fmtDisplay(hoverInfo.length, displayUnit, 2)}</div>
+            </>
+          )}
+          {hoverInfo.kind === 'surface' && (
+            <>
+              <div className="font-semibold">Surface:&nbsp;{hoverInfo.surfaceIndex + 1}</div>
+              <div className="opacity-80">{fmtAreaDisplay(hoverInfo.areaUm2, displayUnit)}</div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

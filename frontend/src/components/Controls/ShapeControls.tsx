@@ -111,7 +111,7 @@ export default function ShapeControls({
       onShapeChange({
         type: 'freeform',
         freeform: shape?.freeform ?? {
-          points: [{ x: 0, y: 0 }, { x: mmToUm(10), y: 0 }, { x: mmToUm(5), y: mmToUm(10) }],
+          points: [{ x: 0, y: 0 }, { x: mmToUm(10), y: 0 }, { x: mmToUm(10), y: mmToUm(10) }, { x: 0, y: mmToUm(10) }],
         },
       })
     }
