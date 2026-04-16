@@ -27,14 +27,14 @@ interface Props {
 const shapeTypes: { label: string; value: ShapeType; hint: string }[] = [
   { label: 'Rectangle', value: 'rectangle', hint: 'Define a rectangular scan area' },
   { label: 'Circle', value: 'circle', hint: 'Define a circular scan area' },
-  { label: 'Freeform', value: 'freeform', hint: 'Define a custom polygon scan area' },
+  { label: 'Custom', value: 'freeform', hint: 'Define a custom polygon scan area' },
 ]
 
 const drawModes: { label: string; value: DrawMode; icon: string | null; hint: string }[] = [
   { label: 'Select', value: 'select', icon: null, hint: 'Select & move shapes' },
   { label: 'Rect', value: 'rectangle', icon: '▭', hint: 'Draw a rectangle by dragging' },
   { label: 'Circle', value: 'circle', icon: '○', hint: 'Draw a circle by dragging' },
-  { label: 'Freeform', value: 'freeform', icon: '✏', hint: 'Click to add vertices; double-click or click near start to close' },
+  { label: 'Custom', value: 'freeform', icon: '✏', hint: 'Click to add vertices; double-click or click near start to close' },
 ]
 
 const INPUT_CLS =
