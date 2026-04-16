@@ -45,9 +45,23 @@ textarea {
   }
 }
 @media print {
-  aside:first-of-type,
-  header button,
+  header,
+  aside,
   .no-print {
     display: none !important;
+  }
+
+  /* Hide raw Konva canvas layers — replaced by a flat <img> via beforeprint JS */
+  canvas {
+    display: none !important;
+  }
+
+  /* Print replacement image: fills the page without clipping */
+  #__print_canvas_img__ {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
 }

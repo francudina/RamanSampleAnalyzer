@@ -230,7 +230,7 @@ export default function App() {
   })()
 
   return (
-    <div className="flex flex-col h-screen h-[100dvh] bg-gray-50 dark:bg-[#111] overflow-hidden">
+    <div className="flex flex-col h-screen h-[100dvh] bg-gray-50 dark:bg-[#111] overflow-hidden print:h-auto print:overflow-visible">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex items-center justify-between px-3 py-2 bg-white dark:bg-[#161616] border-b border-gray-200 dark:border-[#2e2e2e] shrink-0 gap-2">
@@ -272,6 +272,18 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Contact Developer */}
+          <a
+            href="mailto:info@nioquant.com"
+            className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-[#4a9eff] hover:text-[#3a8eef] transition-colors"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
+              <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+              <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+            </svg>
+            Contact Developer
+          </a>
+
           {/* Settings gear */}
           <div className="relative" ref={settingsRef}>
             <button
@@ -384,7 +396,7 @@ export default function App() {
       </header>
 
       {/* ── Main layout ─────────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative print:block print:overflow-visible">
 
         {/* Mobile backdrop */}
         {leftOpen && (
@@ -408,6 +420,7 @@ export default function App() {
             // Shared styles
             'bg-gray-50 dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#3a3a3a]',
             'flex flex-col shrink-0 overflow-hidden',
+            'print:hidden',
           ].join(' ')}
         >
           {/* Mobile drawer header */}
@@ -498,8 +511,8 @@ export default function App() {
         </aside>
 
         {/* Centre canvas + mobile results sheet */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <main className="flex-1 relative overflow-hidden">
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden print:block print:overflow-visible print:h-auto">
+          <main className="flex-1 relative overflow-hidden print:overflow-visible print:h-auto print:static">
             <SampleCanvas
               shape={shape}
               scanResult={scanResult}
@@ -513,7 +526,7 @@ export default function App() {
             />
 
             {/* Status bar */}
-            <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 dark:text-[#888] bg-white/90 dark:bg-[#1e1e1e]/90 border border-gray-200 dark:border-[#333] rounded px-2 py-1 select-none shadow">
+            <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 dark:text-[#888] bg-white/90 dark:bg-[#1e1e1e]/90 border border-gray-200 dark:border-[#333] rounded px-2 py-1 select-none shadow print:hidden">
               <span className="hidden sm:inline">Scroll</span><span className="sm:hidden">Pinch</span> to zoom · <strong className="text-gray-600 dark:text-[#aaa]">{drawMode}</strong>
               {shapeSummary && (
                 <span className="ml-2 text-[#4a9eff]">
@@ -574,7 +587,7 @@ export default function App() {
 
         {/* Right panel — desktop only */}
         {hasGenerated && (
-          <aside className={`hidden md:flex md:flex-col shrink-0 bg-gray-50 dark:bg-[#1e1e1e] border-l border-gray-200 dark:border-[#3a3a3a] shadow-sm transition-all duration-200 ${resultsCollapsed ? 'w-10' : 'w-72'}`}>
+          <aside className={`hidden md:flex md:flex-col shrink-0 bg-gray-50 dark:bg-[#1e1e1e] border-l border-gray-200 dark:border-[#3a3a3a] shadow-sm transition-all duration-200 print:hidden ${resultsCollapsed ? 'w-10' : 'w-72'}`}>
             {/* Collapse toggle strip */}
             <div className="flex items-center justify-between px-2 py-2 border-b border-gray-200 dark:border-[#2e2e2e] shrink-0">
               {!resultsCollapsed && (

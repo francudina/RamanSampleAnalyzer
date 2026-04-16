@@ -7,6 +7,7 @@ import {
   Stage,
   Text,
 } from 'react-konva'
+import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type {
   DrawMode,
@@ -71,6 +72,7 @@ interface Props {
 
 /** Choose the most readable unit for the current grid spacing (µm). */
 function autoGridUnit(spacingUm: number): DisplayUnit {
+  if (spacingUm >= 10_000) return 'cm'
   if (spacingUm >= 1_000) return 'mm'
   if (spacingUm >= 1)     return 'µm'
   return 'nm'
@@ -718,7 +720,8 @@ export default function SampleCanvas({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
-  const [vp, setVp] = useState<Viewport>({ left: -5000, top: -5000, scale: 0.04 })
+  const [vp, setVp] = useState<Viewport>({ left: -100_000, top: -75_000, scale: 0.004 })
+  const vpInitialized = useRef(false)
   const [drawState, setDrawState] = useState<DrawState>({ mode: 'idle' })
   const [panState, setPanState] = useState<{ startX: number; startY: number; vpLeft: number; vpTop: number } | null>(null)
   const [previewRect, setPreviewRect] = useState<{
@@ -731,6 +734,7 @@ export default function SampleCanvas({
   const [snapPoint, setSnapPoint] = useState<Point | null>(null)
 
   // Refs for touch gesture tracking (refs = no stale-closure issues in touch handlers)
+  const stageRef = useRef<Konva.Stage>(null)
   const pinchRef = useRef<{
     dist: number; midX: number; midY: number
     startDist: number; startMidX: number; startMidY: number
@@ -748,11 +752,49 @@ export default function SampleCanvas({
     const obs = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect
-        setSize({ w: Math.floor(width), h: Math.floor(height) })
+        const w = Math.floor(width)
+        const h = Math.floor(height)
+        setSize({ w, h })
+        // Centre origin on first real measurement (no shape yet)
+        if (!vpInitialized.current && w > 0 && h > 0) {
+          vpInitialized.current = true
+          const SCALE = 0.004
+          setVp({ scale: SCALE, left: -(w / 2) / SCALE, top: -(h / 2) / SCALE })
+        }
       }
     })
     if (containerRef.current) obs.observe(containerRef.current)
     return () => obs.disconnect()
+  }, [])
+
+  // Capture stage as a flat image before print so the browser sees one <img>
+  // instead of multi-layer <canvas> elements inside clipped flex containers.
+  useEffect(() => {
+    const beforePrint = () => {
+      const stage = stageRef.current
+      if (!stage) return
+      const dataURL = stage.toDataURL({ pixelRatio: Math.max(window.devicePixelRatio || 1, 2) })
+      const img = document.createElement('img')
+      img.id = '__print_canvas_img__'
+      img.src = dataURL
+      img.style.cssText = 'display:block;width:100%;height:auto;'
+      const container = stage.container()
+      container.appendChild(img)
+      container.querySelectorAll('canvas').forEach((c) => (c as HTMLElement).style.display = 'none')
+    }
+    const afterPrint = () => {
+      const stage = stageRef.current
+      if (!stage) return
+      const container = stage.container()
+      container.querySelector('#__print_canvas_img__')?.remove()
+      container.querySelectorAll('canvas').forEach((c) => (c as HTMLElement).style.display = '')
+    }
+    window.addEventListener('beforeprint', beforePrint)
+    window.addEventListener('afterprint', afterPrint)
+    return () => {
+      window.removeEventListener('beforeprint', beforePrint)
+      window.removeEventListener('afterprint', afterPrint)
+    }
   }, [])
 
   // Fit viewport when shape or scan result changes (skip while actively drawing points)
@@ -1261,8 +1303,9 @@ export default function SampleCanvas({
     : 'crosshair'
 
   return (
-    <div ref={containerRef} className="relative w-full h-full bg-white dark:bg-[#1a1a1a]" style={{ cursor, touchAction: 'none' }}>
+    <div ref={containerRef} className="relative w-full h-full bg-white dark:bg-[#1a1a1a] print:h-auto print:overflow-visible" style={{ cursor, touchAction: 'none' }}>
       <Stage
+        ref={stageRef}
         width={size.w}
         height={size.h}
         onWheel={handleWheel}
@@ -1386,7 +1429,7 @@ export default function SampleCanvas({
       </Stage>
 
       {/* Canvas controls — bottom-right */}
-      <div className="absolute bottom-3 right-3 flex flex-col items-center gap-1.5 z-20 select-none">
+      <div className="absolute bottom-3 right-3 flex flex-col items-center gap-1.5 z-20 select-none print:hidden">
         {/* Zoom */}
         <div className="flex flex-col rounded overflow-hidden shadow border border-gray-200 dark:border-[#3a3a3a]">
           {([
@@ -1415,6 +1458,31 @@ export default function SampleCanvas({
             </button>
           ))}
         </div>
+
+        {/* Center / fit button */}
+        <button
+          title={shape ? 'Fit shape in view' : 'Reset view to origin'}
+          onClick={() => {
+            if (shape) {
+              const bbox = shapeBoundingBox(shape)
+              if (bbox) setVp(fitViewport(bbox.xMin, bbox.yMin, bbox.xMax, bbox.yMax, size.w, size.h))
+            } else {
+              const SCALE = 0.004
+              setVp({ scale: SCALE, left: -(size.w / 2) / SCALE, top: -(size.h / 2) / SCALE })
+            }
+          }}
+          className="w-7 h-7 flex items-center justify-center rounded shadow border border-gray-200 dark:border-[#3a3a3a]
+            bg-white/90 dark:bg-[#2c2c2c]/90 text-gray-600 dark:text-[#aaa]
+            hover:bg-gray-100 dark:hover:bg-[#3a3a3a] transition-colors backdrop-blur-sm"
+        >
+          <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
+            <circle cx="7" cy="7" r="2.5" />
+            <line x1="7" y1="1" x2="7" y2="4" />
+            <line x1="7" y1="10" x2="7" y2="13" />
+            <line x1="1" y1="7" x2="4" y2="7" />
+            <line x1="10" y1="7" x2="13" y2="7" />
+          </svg>
+        </button>
 
         {/* D-pad */}
         <div className="grid grid-cols-3 gap-0.5">
@@ -1465,7 +1533,7 @@ export default function SampleCanvas({
           )}
           {hoverInfo.kind === 'surface' && (
             <>
-              <div className="font-semibold">Surface:&nbsp;{hoverInfo.surfaceIndex + 1}</div>
+              <div className="font-semibold">Surface</div>
               <div className="opacity-80">{fmtAreaDisplay(hoverInfo.areaUm2, displayUnit)}</div>
             </>
           )}
