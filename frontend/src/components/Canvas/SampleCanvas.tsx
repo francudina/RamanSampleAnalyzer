@@ -254,21 +254,37 @@ function ShapeRenderer({
 
 // ── Scan grid renderer ─────────────────────────────────────────────────────────
 
+// Minimum screen-space dot spacing (px) before switching to grid-line mode
+const DOT_SPACING_THRESHOLD = 4
+// Maximum dots to render as individual circles after viewport culling
+const DOT_RENDER_CAP = 5_000
+
 function ScanGridRenderer({
   scanResult,
   vp,
+  width,
+  height,
   focusMode,
   hoveredPass,
   onPassHover,
 }: {
   scanResult: ScanResult
   vp: Viewport
+  width: number
+  height: number
   focusMode: boolean
   hoveredPass: number | null
   onPassHover: (pass: number | null) => void
 }) {
   const toX = (um: number) => umToPixel(um, vp.left, vp.scale)
   const toY = (um: number) => umToPixel(um, vp.top, vp.scale)
+
+  // Viewport bounds in µm with a small buffer so dots don't pop in/out at edges
+  const buf = 16 / vp.scale
+  const visXMin = vp.left - buf
+  const visXMax = vp.left + width  / vp.scale + buf
+  const visYMin = vp.top  - buf
+  const visYMax = vp.top  + height / vp.scale + buf
 
   const elements: React.ReactElement[] = []
 
@@ -288,8 +304,8 @@ function ScanGridRenderer({
         width={(pass.region.x_max - pass.region.x_min) * vp.scale}
         height={(pass.region.y_max - pass.region.y_min) * vp.scale}
         fill="transparent"
-        onMouseEnter={() => focusMode && onPassHover(pass.pass_number)}
-        onMouseLeave={() => focusMode && onPassHover(null)}
+        onMouseEnter={() => onPassHover(pass.pass_number)}
+        onMouseLeave={() => onPassHover(null)}
       />,
     )
 
@@ -325,32 +341,55 @@ function ScanGridRenderer({
       />,
     )
 
-    if (pass.total_points <= 2000) {
-      pass.grid_points.forEach((pt, ptIdx) => {
+    // ── Dots vs grid lines ─────────────────────────────────────────────────────
+    // Show individual dots only when they are visually separated (zoom-dependent)
+    // and after viewport culling the count stays manageable.
+    const dotSpacePx = Math.min(pass.delta_x, pass.delta_y) * vp.scale
+
+    let useDots = false
+    let visiblePts: Array<{ pt: Point; idx: number }> = []
+
+    if (dotSpacePx >= DOT_SPACING_THRESHOLD && hoveredPass === pass.pass_number) {
+      // Collect viewport-visible dots only for the focused pass
+      for (let idx = 0; idx < pass.grid_points.length; idx++) {
+        const pt = pass.grid_points[idx]
+        if (pt.x >= visXMin && pt.x <= visXMax && pt.y >= visYMin && pt.y <= visYMax) {
+          visiblePts.push({ pt, idx })
+          if (visiblePts.length > DOT_RENDER_CAP) break
+        }
+      }
+      useDots = visiblePts.length <= DOT_RENDER_CAP
+    }
+
+    if (useDots) {
+      const r = Math.max(1.5, Math.min(3, vp.scale * 3))
+      for (const { pt, idx } of visiblePts) {
         elements.push(
           <Circle
-            key={`pt-${passIdx}-${ptIdx}`}
+            key={`pt-${passIdx}-${idx}`}
             x={toX(pt.x)}
             y={toY(pt.y)}
-            radius={Math.max(1.5, Math.min(3, vp.scale * 3))}
+            radius={r}
             fill={color}
             opacity={opacity * 0.8}
             listening={false}
           />,
         )
-      })
+      }
     } else {
+      // Grid-line fallback — cull to visible column/row index range
       const r = pass.region
       const stepXpx = pass.delta_x * vp.scale
       const stepYpx = pass.delta_y * vp.scale
 
       if (stepXpx >= 1) {
-        for (let i = 0; i < pass.nx; i++) {
-          const px = toX(r.x_min + i * pass.delta_x)
+        const iMin = Math.max(0, Math.floor((visXMin - r.x_min) / pass.delta_x))
+        const iMax = Math.min(pass.nx - 1, Math.ceil((visXMax - r.x_min) / pass.delta_x))
+        for (let i = iMin; i <= iMax; i++) {
           elements.push(
             <Line
               key={`vline-${passIdx}-${i}`}
-              points={[px, toY(r.y_min), px, toY(r.y_max)]}
+              points={[toX(r.x_min + i * pass.delta_x), toY(r.y_min), toX(r.x_min + i * pass.delta_x), toY(r.y_max)]}
               stroke={color}
               strokeWidth={0.5}
               opacity={opacity * 0.5}
@@ -360,12 +399,13 @@ function ScanGridRenderer({
         }
       }
       if (stepYpx >= 1) {
-        for (let j = 0; j < pass.ny; j++) {
-          const py = toY(r.y_min + j * pass.delta_y)
+        const jMin = Math.max(0, Math.floor((visYMin - r.y_min) / pass.delta_y))
+        const jMax = Math.min(pass.ny - 1, Math.ceil((visYMax - r.y_min) / pass.delta_y))
+        for (let j = jMin; j <= jMax; j++) {
           elements.push(
             <Line
               key={`hline-${passIdx}-${j}`}
-              points={[toX(r.x_min), py, toX(r.x_max), py]}
+              points={[toX(r.x_min), toY(r.y_min + j * pass.delta_y), toX(r.x_max), toY(r.y_min + j * pass.delta_y)]}
               stroke={color}
               strokeWidth={0.5}
               opacity={opacity * 0.5}
@@ -374,6 +414,8 @@ function ScanGridRenderer({
           )
         }
       }
+
+      // Corner markers so the region is always identifiable when zoomed out
       const corners = [
         { x: r.x_min, y: r.y_min },
         { x: r.x_max, y: r.y_min },
@@ -811,6 +853,8 @@ export default function SampleCanvas({
             <ScanGridRenderer
               scanResult={scanResult}
               vp={vp}
+              width={size.w}
+              height={size.h}
               focusMode={focusMode}
               hoveredPass={hoveredPass}
               onPassHover={onPassHover}

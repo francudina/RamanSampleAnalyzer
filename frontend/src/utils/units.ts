@@ -36,11 +36,73 @@ export function displayToUm(val: number, unit: DisplayUnit): number {
   }
 }
 
+// ── Scientific notation ────────────────────────────────────────────────────────
+
+const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹'
+
+/**
+ * Format `value` in scientific notation with `decimals` mantissa decimal places.
+ * Uses Unicode superscripts: 1.23×10⁻⁴
+ */
+function sciStr(value: number, decimals: number): string {
+  if (value === 0) return decimals > 0 ? `0.${'0'.repeat(decimals)}` : '0'
+  const sign = value < 0 ? '−' : ''
+  const abs = Math.abs(value)
+  // Add small epsilon to avoid floor(log10(10^n)) = n-1 due to floating-point
+  let exp = Math.floor(Math.log10(abs) + 1e-10)
+  let mantissa = abs / Math.pow(10, exp)
+  // If rounding the mantissa would push it to 10, bump the exponent
+  if (parseFloat(mantissa.toFixed(decimals)) >= 10) {
+    exp += 1
+    mantissa = abs / Math.pow(10, exp)
+  }
+  const expSign = exp < 0 ? '⁻' : ''
+  const expStr = String(Math.abs(exp)).split('').map((d) => SUP[+d]).join('')
+  return `${sign}${mantissa.toFixed(decimals)}×10${expSign}${expStr}`
+}
+
+/** Returns true when the value is outside the "comfortable" reading range. */
+function needsSci(value: number): boolean {
+  const abs = Math.abs(value)
+  return abs !== 0 && (abs >= 10_000 || abs < 0.001)
+}
+
+/** Format a number, switching to scientific notation for extreme values. */
+function fmt(value: number, decimals: number): string {
+  return needsSci(value) ? sciStr(value, decimals) : value.toFixed(decimals)
+}
+
+// ── Public formatters ──────────────────────────────────────────────────────────
+
 /** Format a µm value using the chosen display unit. */
 export function fmtDisplay(um: number, unit: DisplayUnit, decimals?: number): string {
   const opts = DISPLAY_UNIT_OPTIONS.find((o) => o.value === unit)!
   const d = decimals ?? opts.decimals
-  return `${umToDisplay(um, unit).toFixed(d)} ${unit}`
+  return `${fmt(umToDisplay(um, unit), d)} ${unit}`
+}
+
+/** Format µm² in the current display unit's area (unit²). */
+export function fmtAreaDisplay(um2: number, unit: DisplayUnit): string {
+  switch (unit) {
+    case 'nm': return `${fmt(um2 * 1e6,  1)} nm²`
+    case 'µm': return `${fmt(um2,        2)} µm²`
+    case 'mm': return `${fmt(um2 / 1e6,  4)} mm²`
+    case 'cm': return `${fmt(um2 / 1e8,  6)} cm²`
+  }
+}
+
+/**
+ * Format an integer count, using scientific notation for large values (≥ 10 000).
+ * Mantissa is given 1 decimal place (e.g. 1.2×10⁶).
+ */
+export function fmtCount(n: number): string {
+  return needsSci(n) ? sciStr(n, 1) : n.toLocaleString()
+}
+
+/** Format mm², switching to cm² for large values and sci notation for tiny ones. */
+export function fmtMm2(mm2: number): string {
+  if (mm2 >= 100) return `${fmt(mm2 / 100, 3)} cm²`
+  return `${fmt(mm2, 4)} mm²`
 }
 
 // ── Legacy helpers (kept for internal use) ────────────────────────────────────
@@ -73,22 +135,6 @@ export function formatUm(um: number, decimals = 2): string {
 /** Always show in µm with fixed decimals */
 export function fmtUm(um: number, decimals = 3): string {
   return `${um.toFixed(decimals)} µm`
-}
-
-/** Format µm² in the current display unit's area (unit²) */
-export function fmtAreaDisplay(um2: number, unit: DisplayUnit): string {
-  switch (unit) {
-    case 'nm': return `${(um2 * 1e6).toFixed(1)} nm²`
-    case 'µm': return `${um2.toFixed(2)} µm²`
-    case 'mm': return `${(um2 / 1e6).toFixed(4)} mm²`
-    case 'cm': return `${(um2 / 1e8).toFixed(6)} cm²`
-  }
-}
-
-/** Format mm² */
-export function fmtMm2(mm2: number): string {
-  if (mm2 >= 100) return `${(mm2 / 100).toFixed(3)} cm²`
-  return `${mm2.toFixed(4)} mm²`
 }
 
 /** Format minutes into h m s */

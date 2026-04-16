@@ -3,6 +3,8 @@ import type { ScanPass, ScanResult } from '../../types/scan'
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
+  fmtAreaDisplay,
+  fmtCount,
   fmtDisplay,
   fmtMm2,
   fmtTime,
@@ -34,13 +36,13 @@ function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
     lines.push(`  Start (X, Y):  ${fmt(pass.start_point.x)}  ,  ${fmt(pass.start_point.y)}`)
     lines.push(`  ΔX:  ${fmt(pass.delta_x)}`)
     lines.push(`  ΔY:  ${fmt(pass.delta_y)}`)
-    lines.push(`  Nx:  ${pass.nx}   Ny:  ${pass.ny}   →  ${pass.nx} × ${pass.ny} = ${pass.total_points.toLocaleString()} points`)
+    lines.push(`  Nx:  ${pass.nx}   Ny:  ${pass.ny}   →  ${pass.nx} × ${pass.ny} = ${fmtCount(pass.total_points)} points`)
     lines.push(`  Area:  ${fmtMm2(pass.area_mm2)}`)
     lines.push('')
   })
 
   lines.push('─────────────────────────────────────')
-  lines.push(`Total points:    ${result.total_points.toLocaleString()}`)
+  lines.push(`Total points:    ${fmtCount(result.total_points)}`)
   lines.push(`Total area:      ${fmtMm2(result.total_area_mm2)}`)
   lines.push(`Estimated time:  ${fmtTime(result.estimated_time_minutes)}`)
 
@@ -151,7 +153,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
             >
               <span>Pass {pass.pass_number}</span>
               <div className="flex items-center gap-2">
-                <span className="font-mono">{pass.nx} × {pass.ny} = {pass.total_points.toLocaleString()} pts</span>
+                <span className="font-mono">{pass.nx} × {pass.ny} = {fmtCount(pass.total_points)} pts</span>
                 <button
                   onClick={() => setDetailPass(pass)}
                   className="text-[9px] px-1.5 py-0.5 rounded border font-semibold uppercase tracking-wide transition-colors"
@@ -179,7 +181,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
               ))}
               <div className="col-span-2 border-t border-gray-200 dark:border-[#333] pt-1.5 mt-0.5">
                 <span className="text-[9px] text-gray-400 dark:text-[#666] uppercase tracking-wide block">Area</span>
-                <span className="text-[11px] font-mono text-gray-600 dark:text-[#aaa]">{fmtMm2(pass.area_mm2)}</span>
+                <span className="text-[11px] font-mono text-gray-600 dark:text-[#aaa]">{fmtAreaDisplay(pass.area_mm2 * 1e6, displayUnit)}</span>
               </div>
             </div>
           </div>
@@ -189,8 +191,8 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
       {/* Summary */}
       <div className="rounded border border-gray-200 dark:border-[#333] bg-white dark:bg-[#252525] px-3 py-2 space-y-1.5">
         {[
-          { label: 'Total points', val: result.total_points.toLocaleString() },
-          { label: 'Total area', val: fmtMm2(result.total_area_mm2) },
+          { label: 'Total points', val: fmtCount(result.total_points) },
+          { label: 'Total area', val: fmtAreaDisplay(result.total_area_mm2 * 1e6, displayUnit) },
           { label: 'Estimated time', val: fmtTime(result.estimated_time_minutes) },
         ].map(({ label, val }) => (
           <div key={label} className="flex justify-between text-xs">
@@ -236,7 +238,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
                 <div>
                   <span className="text-sm font-bold" style={{ color }}>Pass {detailPass.pass_number}</span>
                   <span className="ml-2 text-xs text-gray-400 dark:text-[#888]">
-                    {detailPass.total_points.toLocaleString()} points
+                    {fmtCount(detailPass.total_points)} points
                   </span>
                 </div>
                 <button
