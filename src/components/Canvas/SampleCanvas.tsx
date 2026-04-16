@@ -376,7 +376,7 @@ function ScanGridRenderer({
     }
 
     if (useDots) {
-      const r = Math.max(1.5, Math.min(3, vp.scale * 3))
+      const r = Math.max(2.5, Math.min(5, vp.scale * 4))
       for (const { pt, idx } of visiblePts) {
         elements.push(
           <Circle
@@ -385,6 +385,8 @@ function ScanGridRenderer({
             y={toY(pt.y)}
             radius={r}
             fill={color}
+            stroke="rgba(255,255,255,0.75)"
+            strokeWidth={2}
             opacity={opacity * 0.8}
             listening={false}
           />,
