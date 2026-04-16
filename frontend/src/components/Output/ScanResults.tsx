@@ -227,7 +227,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
             onClick={() => setDetailPass(null)}
           >
             <div
-              className="relative bg-white dark:bg-[#1e1e1e] rounded-lg shadow-2xl border border-gray-200 dark:border-[#333] w-[420px] max-h-[70vh] flex flex-col"
+              className="relative bg-white dark:bg-[#1e1e1e] rounded-lg shadow-2xl border border-gray-200 dark:border-[#333] w-[calc(100vw-2rem)] max-w-[420px] max-h-[80vh] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}

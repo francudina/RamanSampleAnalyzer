@@ -59,3 +59,6 @@ desktop.ini
 *.log
 *.tmp
 *.bak
+
+
+node_modules

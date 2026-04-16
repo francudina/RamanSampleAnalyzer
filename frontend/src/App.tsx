@@ -80,19 +80,21 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>('mm')
 
-  // Right panel is shown once the user has clicked Generate (even if loading/error)
   const [hasGenerated, setHasGenerated] = useState(false)
-
-  // Focus/highlight mode — hover pass highlights it on canvas and sidebar
   const [focusMode, setFocusMode] = useState(true)
   const [hoveredPass, setHoveredPass] = useState<number | null>(null)
 
-  // Dark / light mode — initial value comes from <html class="dark"> set by the inline head script
   const [darkMode, setDarkMode] = useState<boolean>(
     () => document.documentElement.classList.contains('dark')
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
+
+  // Mobile panel state
+  const [leftOpen, setLeftOpen] = useState(false)
+  const [resultsOpen, setResultsOpen] = useState(false)
+  // Desktop sidebar collapse
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode)
@@ -110,6 +112,14 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [settingsOpen])
 
+  // Close left drawer when viewport grows past md breakpoint
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const handler = (e: MediaQueryListEvent) => { if (e.matches) setLeftOpen(false) }
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+
   const handleShapeChange = useCallback((s: SampleShape) => {
     setShape(s)
     setScanResult(null)
@@ -124,6 +134,7 @@ export default function App() {
   }, [])
 
   const handleGenerate = () => {
+    setLeftOpen(false) // close drawer on mobile when generating
     if (!shape) {
       setError('Please define a sample shape first.')
       setHasGenerated(true)
@@ -136,6 +147,8 @@ export default function App() {
       const result = generateScanGrid(shape, scanParams, stage)
       setScanResult(result)
       setDrawMode('select')
+      // Auto-open results sheet on mobile
+      if (window.innerWidth < 768) setResultsOpen(true)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -155,28 +168,41 @@ export default function App() {
   })()
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-[#111] overflow-hidden">
+    <div className="flex flex-col h-screen h-[100dvh] bg-gray-50 dark:bg-[#111] overflow-hidden">
+
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-4 py-2 bg-white dark:bg-[#161616] border-b border-gray-200 dark:border-[#2e2e2e] shrink-0">
-        <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-30 flex items-center justify-between px-3 py-2 bg-white dark:bg-[#161616] border-b border-gray-200 dark:border-[#2e2e2e] shrink-0 gap-2">
+
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Mobile hamburger */}
+          <button
+            className="md:hidden flex items-center justify-center w-8 h-8 rounded border border-gray-200 dark:border-[#3a3a3a] bg-white dark:bg-[#2c2c2c] text-gray-500 dark:text-[#888] hover:bg-gray-50 dark:hover:bg-[#333] transition-colors shrink-0"
+            onClick={() => setLeftOpen(true)}
+            title="Open controls"
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-4 h-4">
+              <path d="M2 4h12M2 8h12M2 12h12" />
+            </svg>
+          </button>
+
           <div className="w-7 h-7 rounded bg-[#4a9eff] flex items-center justify-center text-white text-xs font-bold shrink-0 shadow">
             R
           </div>
-          <div>
-            <h1 className="text-sm font-semibold text-gray-900 dark:text-[#e0e0e0]">DXR3 Raman Scan Planner</h1>
-            <p className="text-[10px] text-gray-400 dark:text-[#666]">
+          <div className="hidden sm:block min-w-0">
+            <h1 className="text-sm font-semibold text-gray-900 dark:text-[#e0e0e0] truncate">DXR3 Raman Scan Planner</h1>
+            <p className="text-[10px] text-gray-400 dark:text-[#666] hidden md:block">
               Define sample shape → compute DXR3 scan grid parameters
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {/* Settings gear */}
           <div className="relative" ref={settingsRef}>
             <button
               onClick={() => setSettingsOpen((v) => !v)}
               title="Settings"
-              className={`flex items-center justify-center w-7 h-7 rounded border transition-colors ${
+              className={`flex items-center justify-center w-8 h-8 rounded border transition-colors ${
                 settingsOpen
                   ? 'border-blue-400 bg-blue-50 text-blue-500 dark:border-[#4a9eff] dark:bg-[#1a3a5c] dark:text-[#4a9eff]'
                   : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300 hover:text-gray-600 dark:border-[#3a3a3a] dark:bg-[#2c2c2c] dark:text-[#666] dark:hover:border-[#555] dark:hover:text-[#aaa]'
@@ -233,8 +259,8 @@ export default function App() {
           </div>
 
           {/* Unit selector */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-gray-400 dark:text-[#666] uppercase tracking-wide">Unit</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-400 dark:text-[#666] uppercase tracking-wide hidden sm:inline">Unit</span>
             <select
               value={displayUnit}
               onChange={(e) => setDisplayUnit(e.target.value as DisplayUnit)}
@@ -242,7 +268,8 @@ export default function App() {
             >
               {DISPLAY_UNIT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {/* Abbreviated label on mobile */}
+                  {opt.value}
                 </option>
               ))}
             </select>
@@ -252,80 +279,213 @@ export default function App() {
           <button
             onClick={handleGenerate}
             disabled={!shape || isLoading}
-            className="flex items-center gap-2 px-4 py-1.5 rounded bg-[#4a9eff] text-white text-xs font-semibold hover:bg-[#3a8eef] disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow"
+            className="flex items-center gap-2 px-3 py-1.5 rounded bg-[#4a9eff] text-white text-xs font-semibold hover:bg-[#3a8eef] disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow"
           >
             {isLoading ? (
               <>
-                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Computing…
+                <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="hidden sm:inline">Computing…</span>
+                <span className="sm:hidden">…</span>
               </>
             ) : (
-              'Generate Scan'
+              <>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 shrink-0 sm:hidden">
+                  <path d="M5 3l8 5-8 5V3z" fill="currentColor" stroke="none" />
+                </svg>
+                <span className="hidden sm:inline">Generate Scan</span>
+                <span className="sm:hidden">Scan</span>
+              </>
             )}
           </button>
         </div>
       </header>
 
       {/* ── Main layout ─────────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left panel — collapsible controls */}
-        <aside className="w-72 shrink-0 bg-gray-50 dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#3a3a3a] overflow-y-auto p-2 space-y-1.5 shadow-sm">
-          <CollapsiblePanel title="Sample Shape" defaultOpen>
-            <ShapeControls
-              shape={shape}
-              drawMode={drawMode}
-              displayUnit={displayUnit}
-              onDrawModeChange={setDrawMode}
-              onShapeChange={handleShapeChange}
-              onClear={handleClear}
-            />
-          </CollapsiblePanel>
+      <div className="flex flex-1 overflow-hidden relative">
 
-          <CollapsiblePanel title="Scan Parameters" defaultOpen>
-            <ScanParamsForm
-              params={scanParams}
-              displayUnit={displayUnit}
-              onChange={setScanParams}
-            />
-          </CollapsiblePanel>
+        {/* Mobile backdrop */}
+        {leftOpen && (
+          <div
+            className="md:hidden fixed inset-0 bg-black/50 z-40"
+            onClick={() => setLeftOpen(false)}
+          />
+        )}
 
-          <CollapsiblePanel title="Stage Constraints" defaultOpen>
-            <StageSettings
-              constraints={stage}
-              displayUnit={displayUnit}
-              onChange={setStage}
-            />
-          </CollapsiblePanel>
+        {/* Left sidebar — drawer on mobile, collapsible column on desktop */}
+        <aside
+          className={[
+            // Mobile: fixed overlay from left
+            'fixed inset-y-0 left-0 z-50 w-[17rem] shadow-xl',
+            // Desktop: static column, width toggles with collapse
+            'md:static md:z-auto md:shadow-sm',
+            sidebarCollapsed ? 'md:w-10' : 'md:w-72',
+            // Slide animation (mobile only; md always visible)
+            'transform transition-all duration-200 ease-in-out',
+            leftOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+            // Shared styles
+            'bg-gray-50 dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#3a3a3a]',
+            'flex flex-col shrink-0 overflow-hidden',
+          ].join(' ')}
+        >
+          {/* Mobile drawer header */}
+          <div className="md:hidden flex items-center justify-between px-3 py-2.5 border-b border-gray-200 dark:border-[#3a3a3a] bg-white dark:bg-[#161616] shrink-0">
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-[#888] uppercase tracking-widest">Controls</span>
+            <button
+              onClick={() => setLeftOpen(false)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-[#ccc] transition-colors p-1 -mr-1 rounded"
+              title="Close"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-4 h-4">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Desktop collapse/expand toggle */}
+          <div className="hidden md:flex items-center shrink-0 border-b border-gray-200 dark:border-[#3a3a3a] bg-white dark:bg-[#161616]"
+            style={{ justifyContent: sidebarCollapsed ? 'center' : 'space-between' }}
+          >
+            {!sidebarCollapsed && (
+              <span className="px-3 text-[10px] font-semibold text-gray-400 dark:text-[#666] uppercase tracking-widest">Controls</span>
+            )}
+            <button
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="flex items-center justify-center w-8 h-8 m-0.5 rounded text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa] hover:bg-gray-100 dark:hover:bg-[#2c2c2c] transition-colors"
+              title={sidebarCollapsed ? 'Expand controls' : 'Collapse controls'}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-3.5 h-3.5">
+                <path d={sidebarCollapsed ? 'M6 4l4 4-4 4' : 'M10 4L6 8l4 4'} />
+              </svg>
+            </button>
+          </div>
+
+          {/* Scrollable panel content — hidden on desktop when sidebar is collapsed */}
+          <div className={`flex-1 overflow-y-auto p-2 space-y-1.5${sidebarCollapsed ? ' md:hidden' : ''}`}>
+            <CollapsiblePanel title="Sample Shape" defaultOpen>
+              <ShapeControls
+                shape={shape}
+                drawMode={drawMode}
+                displayUnit={displayUnit}
+                onDrawModeChange={setDrawMode}
+                onShapeChange={handleShapeChange}
+                onClear={handleClear}
+              />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Scan Parameters" defaultOpen>
+              <ScanParamsForm
+                params={scanParams}
+                displayUnit={displayUnit}
+                onChange={setScanParams}
+              />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Stage Constraints" defaultOpen>
+              <StageSettings
+                constraints={stage}
+                displayUnit={displayUnit}
+                onChange={setStage}
+              />
+            </CollapsiblePanel>
+
+            {/* Generate button inside drawer on mobile for easy access */}
+            <div className="md:hidden pt-1">
+              <button
+                onClick={handleGenerate}
+                disabled={!shape || isLoading}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded bg-[#4a9eff] text-white text-sm font-semibold hover:bg-[#3a8eef] disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow"
+              >
+                {isLoading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Computing…
+                  </>
+                ) : (
+                  'Generate Scan'
+                )}
+              </button>
+            </div>
+          </div>
         </aside>
 
-        {/* Centre — canvas */}
-        <main className="flex-1 relative overflow-hidden">
-          <SampleCanvas
-            shape={shape}
-            scanResult={scanResult}
-            drawMode={drawMode}
-            darkMode={darkMode}
-            displayUnit={displayUnit}
-            focusMode={focusMode}
-            hoveredPass={hoveredPass}
-            onPassHover={setHoveredPass}
-            onShapeChange={handleShapeChange}
-          />
+        {/* Centre canvas + mobile results sheet */}
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <main className="flex-1 relative overflow-hidden">
+            <SampleCanvas
+              shape={shape}
+              scanResult={scanResult}
+              drawMode={drawMode}
+              darkMode={darkMode}
+              displayUnit={displayUnit}
+              focusMode={focusMode}
+              hoveredPass={hoveredPass}
+              onPassHover={setHoveredPass}
+              onShapeChange={handleShapeChange}
+            />
 
-          {/* Status bar */}
-          <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 dark:text-[#888] bg-white/90 dark:bg-[#1e1e1e]/90 border border-gray-200 dark:border-[#333] rounded px-2 py-1 select-none shadow">
-            Scroll to zoom · <strong className="text-gray-600 dark:text-[#aaa]">{drawMode}</strong>
-            {shapeSummary && (
-              <span className="ml-2 text-[#4a9eff]">
-                {shape?.type} · {shapeSummary}
-              </span>
-            )}
-          </div>
-        </main>
+            {/* Status bar */}
+            <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 dark:text-[#888] bg-white/90 dark:bg-[#1e1e1e]/90 border border-gray-200 dark:border-[#333] rounded px-2 py-1 select-none shadow">
+              <span className="hidden sm:inline">Scroll</span><span className="sm:hidden">Pinch</span> to zoom · <strong className="text-gray-600 dark:text-[#aaa]">{drawMode}</strong>
+              {shapeSummary && (
+                <span className="ml-2 text-[#4a9eff]">
+                  {shape?.type} · {shapeSummary}
+                </span>
+              )}
+            </div>
+          </main>
 
-        {/* Right panel — only shown after Generate is clicked */}
+          {/* Mobile results bottom sheet */}
+          {hasGenerated && (
+            <div className="md:hidden shrink-0 border-t border-gray-200 dark:border-[#3a3a3a]">
+              {/* Tab button / handle */}
+              <button
+                onClick={() => setResultsOpen((v) => !v)}
+                className="relative w-full flex items-center justify-center gap-2 px-3 pt-4 pb-2.5 bg-white dark:bg-[#1e1e1e] text-xs font-semibold text-gray-600 dark:text-[#aaa] hover:bg-gray-50 dark:hover:bg-[#252525] transition-colors"
+              >
+                {/* Visual drag handle pill */}
+                <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-8 h-1 bg-gray-200 dark:bg-[#444] rounded-full" />
+                <svg
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  className={`w-3 h-3 shrink-0 transition-transform duration-200 ${resultsOpen ? 'rotate-180' : ''}`}
+                >
+                  <path d="M2 8 L6 4 L10 8" />
+                </svg>
+                Scan Results
+                {isLoading && (
+                  <span className="w-3 h-3 border-2 border-[#4a9eff] border-t-transparent rounded-full animate-spin ml-1" />
+                )}
+                {scanResult && !isLoading && (
+                  <span className="ml-1 bg-blue-100 text-blue-600 dark:bg-[#1a3a5c] dark:text-[#4a9eff] rounded-full px-1.5 text-[10px] font-bold">
+                    {scanResult.passes.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Sheet content */}
+              {resultsOpen && (
+                <div className="max-h-[55vh] overflow-y-auto bg-gray-50 dark:bg-[#1e1e1e] p-3">
+                  <ScanResults
+                    result={scanResult}
+                    displayUnit={displayUnit}
+                    isLoading={isLoading}
+                    error={error}
+                    focusMode={focusMode}
+                    hoveredPass={hoveredPass}
+                    onPassHover={setHoveredPass}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right panel — desktop only */}
         {hasGenerated && (
-          <aside className="w-72 shrink-0 bg-gray-50 dark:bg-[#1e1e1e] border-l border-gray-200 dark:border-[#3a3a3a] overflow-y-auto p-3 shadow-sm">
+          <aside className="hidden md:flex md:flex-col w-72 shrink-0 bg-gray-50 dark:bg-[#1e1e1e] border-l border-gray-200 dark:border-[#3a3a3a] overflow-y-auto p-3 shadow-sm">
             <ScanResults
               result={scanResult}
               displayUnit={displayUnit}
