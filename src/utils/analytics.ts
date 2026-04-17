@@ -62,4 +62,28 @@ export const analytics = {
   themeToggled(theme: string) {
     track('theme_toggled', { theme })
   },
+
+  contactClicked() {
+    track('contact_clicked')
+  },
+
+  helpOpened() {
+    track('help_opened')
+  },
+
+  scanInputModeChanged(mode: string) {
+    track('scan_input_mode_changed', { mode })
+  },
+
+  passDetailOpened(passNumber: number) {
+    track('pass_detail_opened', { pass_number: passNumber })
+  },
+
+  focusModeToggled(enabled: boolean) {
+    track('focus_mode_toggled', { enabled })
+  },
+
+  licenceClicked() {
+    track('licence_clicked')
+  },
 }

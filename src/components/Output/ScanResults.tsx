@@ -181,6 +181,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
                 <button
                   onClick={() => {
                     setLoadingPass(pass.pass_number)
+                    analytics.passDetailOpened(pass.pass_number)
                     setTimeout(() => { setDetailPass(pass); setLoadingPass(null) }, 50)
                   }}
                   className="text-[9px] px-1.5 py-0.5 rounded border font-semibold uppercase tracking-wide transition-colors min-w-[48px] flex items-center justify-center gap-1"

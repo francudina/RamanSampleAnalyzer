@@ -276,6 +276,7 @@ export default function App() {
           {/* Contact Developer */}
           <a
             href="mailto:info@nioquant.com"
+            onClick={() => analytics.contactClicked()}
             className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-[#4a9eff] hover:text-[#3a8eef] transition-colors"
           >
             <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 shrink-0">
@@ -336,7 +337,7 @@ export default function App() {
                   <div className="border-t border-gray-100 dark:border-[#333] pt-1.5 mt-1">
                     <p className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 dark:text-[#666] mb-1.5">Canvas</p>
                     <button
-                      onClick={() => setFocusMode((v) => !v)}
+                      onClick={() => setFocusMode((v) => { analytics.focusModeToggled(!v); return !v })}
                       className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-xs transition-colors text-gray-700 dark:text-[#d4d4d4] hover:bg-gray-100 dark:hover:bg-[#333]"
                     >
                       <span>Focus on hover</span>
@@ -347,7 +348,7 @@ export default function App() {
                   </div>
                   <div className="border-t border-gray-100 dark:border-[#333] pt-1.5 mt-1">
                     <button
-                      onClick={() => { setHelpOpen(true); setSettingsOpen(false) }}
+                      onClick={() => { setHelpOpen(true); setSettingsOpen(false); analytics.helpOpened() }}
                       className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded text-xs transition-colors text-gray-700 dark:text-[#d4d4d4] hover:bg-gray-100 dark:hover:bg-[#333]"
                     >
                       <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-400 dark:text-[#666] shrink-0">
@@ -486,7 +487,7 @@ export default function App() {
                 displayUnit={displayUnit}
                 onChange={handleScanParamsChange}
                 inputMode={scanInputMode}
-                onInputModeChange={setScanInputMode}
+                onInputModeChange={(m) => { setScanInputMode(m); analytics.scanInputModeChanged(m) }}
                 targetNx={targetNx}
                 targetNy={targetNy}
                 onTargetNxChange={handleTargetNxChange}
@@ -519,6 +520,19 @@ export default function App() {
                 )}
               </button>
             </div>
+          </div>
+
+          {/* Copyright */}
+          <div className={`shrink-0 px-3 py-2 border-t border-gray-200 dark:border-[#2e2e2e]${sidebarCollapsed ? ' md:hidden' : ''}`}>
+            <p className="text-[9px] text-gray-400 dark:text-[#555] text-center">
+              <a
+                href="https://nioquant.com/raman/licence"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => analytics.licenceClicked()}
+                className="hover:text-[#4a9eff] dark:hover:text-[#4a9eff] transition-colors"
+              >Copyright &copy; 2026 Nioquant</a>
+            </p>
           </div>
         </aside>
 
