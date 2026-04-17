@@ -103,4 +103,4 @@ export type DrawState =
   | { mode: 'idle' }
   | { mode: 'drawing_rect'; startX: number; startY: number }
   | { mode: 'drawing_circle'; cx: number; cy: number }
-  | { mode: 'drawing_freeform'; points: Point[]; preview: Point | null }
+  | { mode: 'drawing_freeform'; points: Point[]; preview: Point | null; anchorIndex?: number }

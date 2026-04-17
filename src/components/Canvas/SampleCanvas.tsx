@@ -600,20 +600,24 @@ function DrawingPreview({
     if (pts.length === 0) return null
 
     const flatPts = pts.flatMap((p) => [toX(p.x), toY(p.y)])
+    const anchorIdx = (drawState.anchorIndex !== undefined && drawState.anchorIndex < pts.length)
+      ? drawState.anchorIndex
+      : undefined
 
-    // Cursor preview line from last point to mouse
-    const previewLine = drawState.preview
-      ? [...flatPts, toX(drawState.preview.x), toY(drawState.preview.y)]
-      : flatPts
+    // Cursor preview line: from anchor point when set, else from last point
+    const previewOrigin = anchorIdx !== undefined ? pts[anchorIdx] : pts[pts.length - 1]
+    const previewLine = drawState.preview && previewOrigin
+      ? [toX(previewOrigin.x), toY(previewOrigin.y), toX(drawState.preview.x), toY(drawState.preview.y)]
+      : []
 
     return (
       <>
-        {/* Filled polygon for 3+ points */}
-        {pts.length >= 3 && (
+        {/* Solid closed line through all drawn points (always visible for 2+) */}
+        {pts.length >= 2 && (
           <Line
             points={flatPts}
             closed
-            fill="rgba(59,130,246,0.10)"
+            fill={pts.length >= 3 ? 'rgba(59,130,246,0.10)' : 'transparent'}
             stroke="#2563eb"
             strokeWidth={1.5}
             listening={false}
@@ -621,13 +625,15 @@ function DrawingPreview({
         )}
 
         {/* Cursor preview line */}
-        <Line
-          points={previewLine}
-          stroke="#2563eb"
-          strokeWidth={2}
-          dash={[4, 4]}
-          listening={false}
-        />
+        {previewLine.length > 0 && (
+          <Line
+            points={previewLine}
+            stroke="#2563eb"
+            strokeWidth={2}
+            dash={[4, 4]}
+            listening={false}
+          />
+        )}
 
         {/* Segment labels — same as ShapeRenderer */}
         {pts.map((p, i) => {
@@ -668,28 +674,45 @@ function DrawingPreview({
         })}
 
         {/* Vertex dots + P labels — same as ShapeRenderer */}
-        {pts.map((p, i) => (
-          <React.Fragment key={`vtx-${i}`}>
-            <Circle
-              x={toX(p.x)}
-              y={toY(p.y)}
-              radius={i === 0 ? 6 : 5}
-              fill={i === 0 ? '#2563eb' : 'white'}
-              stroke="#2563eb"
-              strokeWidth={2}
-              listening={false}
-            />
-            <Text
-              x={toX(p.x) + 8}
-              y={toY(p.y) - 10}
-              text={`P${i + 1}`}
-              fontSize={11}
-              fontStyle="bold"
-              fill="#1d4ed8"
-              listening={false}
-            />
-          </React.Fragment>
-        ))}
+        {pts.map((p, i) => {
+          const isAnchor = anchorIdx === i
+          const isFirst  = i === 0
+          return (
+            <React.Fragment key={`vtx-${i}`}>
+              {/* Anchor pulse ring */}
+              {isAnchor && (
+                <Circle
+                  x={toX(p.x)}
+                  y={toY(p.y)}
+                  radius={10}
+                  fill="rgba(251,191,36,0.25)"
+                  stroke="#f59e0b"
+                  strokeWidth={1.5}
+                  dash={[3, 3]}
+                  listening={false}
+                />
+              )}
+              <Circle
+                x={toX(p.x)}
+                y={toY(p.y)}
+                radius={isFirst ? 6 : 5}
+                fill={isAnchor ? '#f59e0b' : isFirst ? '#2563eb' : 'white'}
+                stroke={isAnchor ? '#f59e0b' : '#2563eb'}
+                strokeWidth={2}
+                listening={false}
+              />
+              <Text
+                x={toX(p.x) + 8}
+                y={toY(p.y) - 10}
+                text={`P${i + 1}`}
+                fontSize={11}
+                fontStyle="bold"
+                fill={isAnchor ? '#d97706' : '#1d4ed8'}
+                listening={false}
+              />
+            </React.Fragment>
+          )
+        })}
       </>
     )
   }
@@ -845,7 +868,13 @@ export default function SampleCanvas({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setDrawState({ mode: 'idle' })
+        // If anchor is active, just clear the anchor (keep drawing state)
+        setDrawState((prev) => {
+          if (prev.mode === 'drawing_freeform' && prev.anchorIndex !== undefined) {
+            return { ...prev, anchorIndex: undefined }
+          }
+          return { mode: 'idle' }
+        })
         setPreviewRect(null)
         setPreviewCircle(null)
         setPanState(null)
@@ -921,6 +950,8 @@ export default function SampleCanvas({
           onShapeChange({ type: 'freeform', freeform: { points: startPts } })
           setDrawState({ mode: 'drawing_freeform', points: startPts, preview: null })
         } else {
+          const anchorIdx = drawState.mode === 'drawing_freeform' ? drawState.anchorIndex : undefined
+
           // Check if clicking near any existing vertex
           const HIT_PX = 12
           let hitIndex = -1
@@ -930,20 +961,31 @@ export default function SampleCanvas({
             if (Math.sqrt(dx * dx + dy * dy) < HIT_PX) { hitIndex = i; break }
           }
 
-          if (hitIndex === 0 && existing.length >= 3) {
-            // Click near first point → close polygon
-            onShapeChange({ type: 'freeform', freeform: { points: existing } })
-            setDrawState({ mode: 'idle' })
-          } else if (hitIndex > 0 && hitIndex < existing.length - 1) {
-            // Click near a middle vertex → rotate so that vertex becomes last, resume from it
-            const rotated = [...existing.slice(hitIndex + 1), ...existing.slice(0, hitIndex + 1)]
-            onShapeChange({ type: 'freeform', freeform: { points: rotated } })
-            setDrawState({ mode: 'drawing_freeform', points: rotated, preview: null })
-          } else if (hitIndex === existing.length - 1) {
-            // Click near last vertex → just re-enter drawing state if not already in it
-            setDrawState({ mode: 'drawing_freeform', points: existing, preview: null })
+          if (hitIndex >= 0) {
+            // Click near first point with no anchor → close polygon
+            if (hitIndex === 0 && existing.length >= 3 && anchorIdx === undefined) {
+              onShapeChange({ type: 'freeform', freeform: { points: existing } })
+              setDrawState({ mode: 'idle' })
+            } else {
+              // Select this vertex as the anchor for directed insertion
+              setDrawState({ mode: 'drawing_freeform', points: existing, preview: null, anchorIndex: hitIndex })
+            }
+          } else if (anchorIdx !== undefined) {
+            // Anchor is active — insert new point directionally relative to anchor
+            const Pi = existing[anchorIdx]
+            const Pnext = existing[(anchorIdx + 1) % existing.length]
+            const forward = { x: Pnext.x - Pi.x, y: Pnext.y - Pi.y }
+            const newVec  = { x: um.x   - Pi.x, y: um.y   - Pi.y }
+            const dot = forward.x * newVec.x + forward.y * newVec.y
+            // dot >= 0: new point is in the forward direction → insert after anchor
+            // dot <  0: new point is in the backward direction → insert before anchor
+            const insertPos = dot >= 0 ? anchorIdx + 1 : anchorIdx
+            const newPts = [...existing.slice(0, insertPos), um, ...existing.slice(insertPos)]
+            onShapeChange({ type: 'freeform', freeform: { points: newPts } })
+            // New point becomes the next anchor for continued drawing
+            setDrawState({ mode: 'drawing_freeform', points: newPts, preview: null, anchorIndex: insertPos })
           } else {
-            // No vertex hit → add new point
+            // No anchor, no vertex hit → append to end
             const newPts = [...existing, um]
             onShapeChange({ type: 'freeform', freeform: { points: newPts } })
             setDrawState({ mode: 'drawing_freeform', points: newPts, preview: null })

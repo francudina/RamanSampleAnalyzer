@@ -73,6 +73,7 @@ function CollapsiblePanel({
 
 export default function App() {
   const [shape, setShape] = useState<SampleShape | null>(null)
+  const [shapeHistory, setShapeHistory] = useState<(SampleShape | null)[]>([])
   const [drawMode, setDrawMode] = useState<DrawMode>('rectangle')
   const [scanParams, setScanParams] = useState<ScanParameters>(DEFAULT_SCAN_PARAMS)
   const [stage, setStage] = useState<StageConstraints>(DEFAULT_STAGE)
@@ -172,18 +173,46 @@ export default function App() {
     }
   }, [])
 
-  const handleShapeChange = useCallback((s: SampleShape) => {
-    setShape(s)
-    setScanResult(null)
-    setError(null)
+  const pushHistory = useCallback((prev: SampleShape | null) => {
+    setShapeHistory((h) => [...h.slice(-49), prev])
   }, [])
 
+  const handleShapeChange = useCallback((s: SampleShape) => {
+    setShape((prev) => { pushHistory(prev); return s })
+    setScanResult(null)
+    setError(null)
+  }, [pushHistory])
+
   const handleClear = useCallback(() => {
-    setShape(null)
+    setShape((prev) => { pushHistory(prev); return null })
     setScanResult(null)
     setError(null)
     setHasGenerated(false)
+  }, [pushHistory])
+
+  const handleUndo = useCallback(() => {
+    setShapeHistory((h) => {
+      if (h.length === 0) return h
+      const prev = h[h.length - 1]
+      setShape(prev)
+      setScanResult(null)
+      setError(null)
+      if (prev === null) setHasGenerated(false)
+      return h.slice(0, -1)
+    })
   }, [])
+
+  // Ctrl+Z / Cmd+Z undo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault()
+        handleUndo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [handleUndo])
 
   const handleGenerate = () => {
     setLeftOpen(false) // close drawer on mobile when generating

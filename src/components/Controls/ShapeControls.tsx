@@ -125,6 +125,8 @@ export default function ShapeControls({
         type: 'freeform',
         freeform: { points: points ?? [{ x: 0, y: 0 }, { x: mmToUm(200), y: 0 }, { x: mmToUm(200), y: mmToUm(100) }, { x: 0, y: mmToUm(100) }] },
       })
+      onDrawModeChange('freeform')
+      return
     }
     onDrawModeChange('select')
   }
