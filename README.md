@@ -1,4 +1,4 @@
-# Raman Scan Planner
+# Raman Sample Analyzer
 
 A browser-based tool for planning Raman microscopy scan grids. Define your sample shape on an interactive canvas, configure scan parameters, and generate an optimised point grid : before touching the instrument.
 
