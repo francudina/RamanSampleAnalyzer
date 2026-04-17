@@ -21,14 +21,14 @@ import {
 import { analytics } from './utils/analytics'
 
 const DEFAULT_SCAN_PARAMS: ScanParameters = {
-  step_x: 50,
-  step_y: 50,
+  step_x: mmToUm(5),
+  step_y: mmToUm(5),
   overlap: 0,
 }
 
 const DEFAULT_STAGE: StageConstraints = {
-  max_scan_width: mmToUm(25),
-  max_scan_height: mmToUm(25),
+  max_scan_width: mmToUm(50),
+  max_scan_height: mmToUm(50),
   time_per_point_seconds: 1,
 }
 
@@ -72,7 +72,15 @@ function CollapsiblePanel({
 // ── Root app ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [shape, setShape] = useState<SampleShape | null>(null)
+  const [shape, setShape] = useState<SampleShape | null>({
+    type: 'rectangle',
+    rect: {
+      x: 0,
+      y: 0,
+      width: mmToUm(200),
+      height: mmToUm(100),
+    },
+  })
   const [drawMode, setDrawMode] = useState<DrawMode>('rectangle')
   const [scanParams, setScanParams] = useState<ScanParameters>(DEFAULT_SCAN_PARAMS)
   const [stage, setStage] = useState<StageConstraints>(DEFAULT_STAGE)
