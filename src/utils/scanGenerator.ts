@@ -1,4 +1,6 @@
 import type {
+  ExclusionZone,
+  Point,
   SampleShape,
   ScanParameters,
   ScanPass,
@@ -37,8 +39,7 @@ function inCircle(x: number, y: number, shape: SampleShape): boolean {
   return (x - c.cx) ** 2 + (y - c.cy) ** 2 <= c.radius ** 2
 }
 
-function inPolygon(x: number, y: number, shape: SampleShape): boolean {
-  const pts = shape.freeform!.points
+export function polygonContains(x: number, y: number, pts: Point[]): boolean {
   const n = pts.length
   let inside = false
   let j = n - 1
@@ -54,14 +55,23 @@ function inPolygon(x: number, y: number, shape: SampleShape): boolean {
   return inside
 }
 
-function pointInShape(x: number, y: number, shape: SampleShape): boolean {
-  if (shape.type === 'rectangle') return inRect(x, y, shape)
-  if (shape.type === 'circle') return inCircle(x, y, shape)
-  if (shape.type === 'freeform') return inPolygon(x, y, shape)
-  return false
+function inPolygon(x: number, y: number, shape: SampleShape): boolean {
+  return polygonContains(x, y, shape.freeform!.points)
 }
 
-export { pointInShape }
+export function pointInShape(x: number, y: number, shape: SampleShape, exclusionZones?: Point[][]): boolean {
+  let inside = false
+  if (shape.type === 'rectangle') inside = inRect(x, y, shape)
+  else if (shape.type === 'circle') inside = inCircle(x, y, shape)
+  else if (shape.type === 'freeform') inside = inPolygon(x, y, shape)
+  if (!inside) return false
+  if (exclusionZones) {
+    for (const zone of exclusionZones) {
+      if (polygonContains(x, y, zone)) return false
+    }
+  }
+  return true
+}
 
 // ── Region splitting ───────────────────────────────────────────────────────────
 
@@ -100,6 +110,7 @@ function generatePass(
   effStepX: number,
   effStepY: number,
   shape: SampleShape,
+  exclusionZones?: Point[][],
 ): ScanPass {
   const [xMin, yMin, xMax, yMax] = region
 
@@ -114,7 +125,7 @@ function generatePass(
     for (let i = 0; i < nx; i++) {
       const px = xMin + i * effStepX
       const py = yMin + j * effStepY
-      if (pointInShape(px, py, shape)) {
+      if (pointInShape(px, py, shape, exclusionZones)) {
         gridPoints.push({ x: Math.round(px * 1e4) / 1e4, y: Math.round(py * 1e4) / 1e4 })
       }
     }
@@ -149,6 +160,7 @@ export function generateScanGrid(
   shape: SampleShape,
   scanParams: ScanParameters,
   stage: StageConstraints,
+  exclusionZones?: ExclusionZone[],
 ): ScanResult {
   const warnings: string[] = []
 
@@ -182,8 +194,9 @@ export function generateScanGrid(
     regions = [bounds]
   }
 
+  const exZonePts = exclusionZones?.map((z) => z.points)
   const rawPasses: ScanPass[] = regions.map((region, i) =>
-    generatePass(i + 1, region, effStepX, effStepY, shape),
+    generatePass(i + 1, region, effStepX, effStepY, shape, exZonePts),
   )
 
   // Remove tiles where no scan point falls inside the shape, then renumber

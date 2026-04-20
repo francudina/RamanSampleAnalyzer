@@ -92,7 +92,7 @@ export interface ImageDetectionResult {
 
 // ── Canvas / UI types ──────────────────────────────────────────────────────────
 
-export type DrawMode = 'select' | 'rectangle' | 'circle' | 'freeform'
+export type DrawMode = 'select' | 'rectangle' | 'circle' | 'freeform' | 'exclusion'
 
 export interface Viewport {
   left: number  // left edge in microns
@@ -105,6 +105,12 @@ export type DrawState =
   | { mode: 'drawing_rect'; startX: number; startY: number }
   | { mode: 'drawing_circle'; cx: number; cy: number }
   | { mode: 'drawing_freeform'; points: Point[]; preview: Point | null; anchorIndex?: number }
+  | { mode: 'drawing_exclusion'; points: Point[]; preview: Point | null }
+
+export interface ExclusionZone {
+  id: string
+  points: Point[] // closed polygon vertices in µm
+}
 
 // ── Full session config (export / import) ─────────────────────────────────────
 
@@ -119,6 +125,7 @@ export interface FullConfig {
   targetNx: number
   targetNy: number
   rotationOptimizerEnabled: boolean
+  exclusionZones: ExclusionZone[]
 }
 
 // ── Rotation optimizer ─────────────────────────────────────────────────────────

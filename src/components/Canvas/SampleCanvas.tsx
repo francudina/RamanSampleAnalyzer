@@ -14,6 +14,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import type {
   DrawMode,
   DrawState,
+  ExclusionZone,
   Point,
   RotationOptimum,
   SampleShape,
@@ -73,6 +74,9 @@ interface Props {
   rotationOptimum: RotationOptimum | null
   rotationTab?: 'current' | 'rotated'
   rotatedScanResult?: ScanResult | null
+  exclusionZones: ExclusionZone[]
+  onExclusionZoneAdd: (points: Point[]) => void
+  onRegisterSnapshot: (fn: () => string | null) => void
 }
 
 // ── Grid lines helper ──────────────────────────────────────────────────────────
@@ -606,6 +610,48 @@ function ScanGridRenderer({
   return <>{elements}</>
 }
 
+// ── Exclusion zone renderer ────────────────────────────────────────────────────
+
+function ExclusionZoneRenderer({ zones, vp }: { zones: ExclusionZone[]; vp: Viewport }) {
+  const toX = (um: number) => umToPixel(um, vp.left, vp.scale)
+  const toY = (um: number) => umToPixel(um, vp.top, vp.scale)
+  return (
+    <>
+      {zones.map((zone, zi) => {
+        if (zone.points.length < 3) return null
+        const flat = zone.points.flatMap((p) => [toX(p.x), toY(p.y)])
+        const cx = zone.points.reduce((s, p) => s + toX(p.x), 0) / zone.points.length
+        const cy = zone.points.reduce((s, p) => s + toY(p.y), 0) / zone.points.length
+        return (
+          <React.Fragment key={zone.id}>
+            <Line
+              points={flat}
+              closed
+              fill="rgba(239,68,68,0.18)"
+              stroke="#ef4444"
+              strokeWidth={1.5}
+              dash={[5, 3]}
+              listening={false}
+            />
+            <Text
+              x={cx}
+              y={cy}
+              text={`E${zi + 1}`}
+              fontSize={10}
+              fontStyle="bold"
+              fill="#ef4444"
+              opacity={0.8}
+              offsetX={8}
+              offsetY={5}
+              listening={false}
+            />
+          </React.Fragment>
+        )
+      })}
+    </>
+  )
+}
+
 // ── Drawing preview ────────────────────────────────────────────────────────────
 
 function DrawingPreview({
@@ -762,6 +808,39 @@ function DrawingPreview({
     )
   }
 
+  if (drawState.mode === 'drawing_exclusion') {
+    const pts = drawState.points
+    if (pts.length === 0) return null
+    const flat = pts.flatMap((p) => [toX(p.x), toY(p.y)])
+    const previewLine = drawState.preview && pts.length > 0
+      ? [toX(pts[pts.length - 1].x), toY(pts[pts.length - 1].y), toX(drawState.preview.x), toY(drawState.preview.y)]
+      : []
+    return (
+      <>
+        {pts.length >= 2 && (
+          <Line
+            points={flat}
+            closed
+            fill={pts.length >= 3 ? 'rgba(239,68,68,0.15)' : 'transparent'}
+            stroke="#ef4444"
+            strokeWidth={1.5}
+            dash={[5, 3]}
+            listening={false}
+          />
+        )}
+        {previewLine.length > 0 && (
+          <Line points={previewLine} stroke="#ef4444" strokeWidth={1.5} dash={[4, 4]} listening={false} />
+        )}
+        {pts.map((p, i) => (
+          <React.Fragment key={i}>
+            <Circle x={toX(p.x)} y={toY(p.y)} radius={i === 0 ? 6 : 4}
+              fill={i === 0 ? '#ef4444' : '#fca5a5'} stroke="#ef4444" strokeWidth={1.5} listening={false} />
+          </React.Fragment>
+        ))}
+      </>
+    )
+  }
+
   return null
 }
 
@@ -788,6 +867,9 @@ export default function SampleCanvas({
   rotationOptimum,
   rotationTab,
   rotatedScanResult,
+  exclusionZones,
+  onExclusionZoneAdd,
+  onRegisterSnapshot,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -817,6 +899,11 @@ export default function SampleCanvas({
   const prevDrawModeRef = useRef<DrawMode>(drawMode)
   const drawStateRef = useRef(drawState)
   drawStateRef.current = drawState
+
+  // Register snapshot function for PDF export
+  useEffect(() => {
+    onRegisterSnapshot(() => stageRef.current?.toDataURL({ pixelRatio: 2 }) ?? null)
+  }, [onRegisterSnapshot])
 
   // Responsive canvas sizing
   useEffect(() => {
@@ -1031,9 +1118,24 @@ export default function SampleCanvas({
             setDrawState({ mode: 'drawing_freeform', points: newPts, preview: null })
           }
         }
+      } else if (drawMode === 'exclusion') {
+        const pts = drawState.mode === 'drawing_exclusion' ? drawState.points : []
+        if (pts.length === 0) {
+          setDrawState({ mode: 'drawing_exclusion', points: [um], preview: null })
+        } else {
+          const first = pts[0]
+          const dx = (um.x - first.x) * vp.scale
+          const dy = (um.y - first.y) * vp.scale
+          if (pts.length >= 3 && Math.sqrt(dx * dx + dy * dy) < 12) {
+            onExclusionZoneAdd(pts)
+            setDrawState({ mode: 'idle' })
+          } else {
+            setDrawState({ mode: 'drawing_exclusion', points: [...pts, um], preview: null })
+          }
+        }
       }
     },
-    [drawMode, drawState, onShapeChange, vp],
+    [drawMode, drawState, onExclusionZoneAdd, onShapeChange, vp],
   )
 
   const handlePointerMove = useCallback(
@@ -1154,6 +1256,9 @@ export default function SampleCanvas({
         setPreviewCircle({ cx: drawState.cx, cy: drawState.cy, r: Math.sqrt(dx * dx + dy * dy) })
         setHoverInfo(null)
       } else if (drawState.mode === 'drawing_freeform') {
+        setDrawState({ ...drawState, preview: snapped })
+        setHoverInfo(null)
+      } else if (drawState.mode === 'drawing_exclusion') {
         setDrawState({ ...drawState, preview: snapped })
         setHoverInfo(null)
       } else if (shape?.type === 'freeform' && shape.freeform) {
@@ -1303,9 +1408,12 @@ export default function SampleCanvas({
       if (drawState.mode === 'drawing_freeform' && drawState.points.length >= 3) {
         onShapeChange({ type: 'freeform', freeform: { points: drawState.points } })
         setDrawState({ mode: 'idle' })
+      } else if (drawState.mode === 'drawing_exclusion' && drawState.points.length >= 3) {
+        onExclusionZoneAdd(drawState.points)
+        setDrawState({ mode: 'idle' })
       }
     },
-    [drawState, onShapeChange],
+    [drawState, onExclusionZoneAdd, onShapeChange],
   )
 
   // ── Touch handlers ───────────────────────────────────────────────────────────
@@ -1501,8 +1609,11 @@ export default function SampleCanvas({
           {/* Sample shape — hidden while the user is actively editing it as freeform */}
           {shape && drawState.mode !== 'drawing_freeform' && <ShapeRenderer shape={shape} vp={vp} />}
 
-          {/* Scan grid */}
-          {(() => {
+          {/* Exclusion zones */}
+          <ExclusionZoneRenderer zones={exclusionZones} vp={vp} />
+
+          {/* Scan grid — hidden while drawing exclusion zones */}
+          {drawMode !== 'exclusion' && (() => {
             const showRotated = rotationTab === 'rotated' &&
               rotatedScanResult != null &&
               rotationOptimum != null

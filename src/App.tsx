@@ -3,12 +3,15 @@ import { generateScanGrid } from './utils/scanGenerator'
 import { findOptimalRotation, getRotatedFreeformShape } from './utils/tilingPlanner'
 import SampleCanvas from './components/Canvas/SampleCanvas'
 import ShapeControls from './components/Controls/ShapeControls'
+import ExclusionControls from './components/Controls/ExclusionControls'
 import ScanParamsForm from './components/Controls/ScanParamsForm'
 import StageSettings from './components/Controls/StageSettings'
 import ScanResults from './components/Output/ScanResults'
 import type {
   DrawMode,
+  ExclusionZone,
   FullConfig,
+  Point,
   SampleShape,
   ScanParameters,
   ScanResult,
@@ -211,6 +214,24 @@ export default function App() {
     })
   }, [])
 
+  const [exclusionZones, setExclusionZones] = useState<ExclusionZone[]>([])
+
+  const handleExclusionZoneAdd = useCallback((points: Point[]) => {
+    setExclusionZones((prev) => [...prev, { id: `ez-${Date.now()}`, points }])
+    setScanResult(null)
+    setDrawMode('select')
+  }, [])
+
+  const handleExclusionZoneRemove = useCallback((id: string) => {
+    setExclusionZones((prev) => prev.filter((z) => z.id !== id))
+    setScanResult(null)
+  }, [])
+
+  const snapshotFnRef = useRef<(() => string | null) | null>(null)
+  const handleRegisterSnapshot = useCallback((fn: () => string | null) => {
+    snapshotFnRef.current = fn
+  }, [])
+
   const handleImportConfig = useCallback((config: FullConfig) => {
     const { displayUnit: du, shape: s, scanParams: sp, stage: st,
             scanInputMode: sim, targetNx: nx, targetNy: ny,
@@ -224,6 +245,7 @@ export default function App() {
     setTargetNx(nx)
     setTargetNy(ny)
     setRotationOptimizerEnabled(rot)
+    setExclusionZones(config.exclusionZones ?? [])
     setScanResult(null)
     setError(null)
     setHasGenerated(false)
@@ -291,7 +313,7 @@ export default function App() {
           step_y: ny > 1 ? stage.max_scan_height / (ny - 1) : stage.max_scan_height,
         }
       }
-      const result = generateScanGrid(shape, params, stage)
+      const result = generateScanGrid(shape, params, stage, exclusionZones)
       setScanResult(result)
       setDrawMode('select')
       analytics.scanGenerated(result.total_points, shape.type, params.step_x)
@@ -554,10 +576,21 @@ export default function App() {
                 targetNx={targetNx}
                 targetNy={targetNy}
                 rotationOptimizerEnabled={rotationOptimizerEnabled}
+                exclusionZones={exclusionZones}
                 onDrawModeChange={setDrawMode}
                 onShapeChange={handleShapeChange}
                 onClear={handleClear}
                 onImportConfig={handleImportConfig}
+              />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Exclusion Zones" defaultOpen={false}>
+              <ExclusionControls
+                exclusionZones={exclusionZones}
+                drawMode={drawMode}
+                onDrawModeChange={setDrawMode}
+                onRemove={handleExclusionZoneRemove}
+                onClearAll={() => { setExclusionZones([]); setScanResult(null) }}
               />
             </CollapsiblePanel>
 
@@ -632,6 +665,9 @@ export default function App() {
               rotationOptimum={rotationOptimum}
               rotationTab={rotationTab}
               rotatedScanResult={rotatedScanResult}
+              exclusionZones={exclusionZones}
+              onExclusionZoneAdd={handleExclusionZoneAdd}
+              onRegisterSnapshot={handleRegisterSnapshot}
             />
 
           </main>
@@ -684,6 +720,10 @@ export default function App() {
                     rotatedScanResult={rotatedScanResult}
                     activeTab={rotationTab}
                     onActiveTabChange={setRotationTab}
+                    getSnapshot={() => snapshotFnRef.current?.() ?? null}
+                    shape={shape}
+                    scanParams={scanParams}
+                    stage={stage}
                   />
                 </div>
               )}
@@ -726,6 +766,10 @@ export default function App() {
                   rotatedScanResult={rotatedScanResult}
                   activeTab={rotationTab}
                   onActiveTabChange={setRotationTab}
+                  getSnapshot={() => snapshotFnRef.current?.() ?? null}
+                  shape={shape}
+                  scanParams={scanParams}
+                  stage={stage}
                 />
               </div>
             )}

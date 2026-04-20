@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RotationOptimum, ScanPass, ScanResult } from '../../types/scan'
+import jsPDF from 'jspdf'
+import type { RotationOptimum, SampleShape, ScanParameters, ScanPass, ScanResult, StageConstraints } from '../../types/scan'
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
@@ -26,6 +27,10 @@ interface Props {
   rotatedScanResult?: ScanResult | null
   activeTab?: 'current' | 'rotated'
   onActiveTabChange?: (tab: 'current' | 'rotated') => void
+  getSnapshot?: () => string | null
+  shape?: SampleShape | null
+  scanParams?: ScanParameters
+  stage?: StageConstraints
 }
 
 const PASS_COLORS = ['#4a9eff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#06b6d4']
@@ -85,6 +90,10 @@ export default function ScanResults({
   rotatedScanResult,
   activeTab: activeTabProp,
   onActiveTabChange,
+  getSnapshot,
+  shape,
+  scanParams,
+  stage,
 }: Props) {
   const [copied, setCopied] = useState(false)
   const [detailPass, setDetailPass] = useState<ScanPass | null>(null)
@@ -112,6 +121,258 @@ export default function ScanResults({
     setCopied(true)
     analytics.scanCopied()
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleExportCsv = () => {
+    if (!result) return
+    const isRotated = activeTab === 'rotated' && rotatedScanResult &&
+      rotatedScanResult.passes.length < result.passes.length
+    const src = isRotated ? rotatedScanResult! : result
+    const dec = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!.decimals
+    const lines = [`No,Tile,X (${displayUnit}),Y (${displayUnit})`]
+    let order = 1
+    for (const pass of src.passes) {
+      for (const pt of pass.grid_points) {
+        lines.push(
+          `${order},Tile ${pass.pass_number},` +
+          `${umToDisplay(pt.x, displayUnit).toFixed(dec)},` +
+          `${umToDisplay(pt.y, displayUnit).toFixed(dec)}`
+        )
+        order++
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    a.download = `ScanPoints-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.csv`
+    a.href = url
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportPdf = () => {
+    if (!result) return
+    const isRotated = activeTab === 'rotated' && rotatedScanResult &&
+      rotatedScanResult.passes.length < result.passes.length
+    const src = isRotated ? rotatedScanResult! : result
+    const snapshot = getSnapshot?.()
+
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W = 210, H = 297, margin = 14, footerY = 284
+    const contentW = W - margin * 2
+
+    // Area formatter safe for jsPDF (no Unicode superscripts)
+    const fmtArea = (mm2: number): string => {
+      if (mm2 >= 100)    return `${(mm2 / 100).toFixed(3)} cm2`
+      if (mm2 >= 0.0001) return `${mm2.toFixed(4)} mm2`
+      return `${(mm2 * 1e6).toFixed(2)} um2`
+    }
+
+    // Header bar
+    pdf.setFillColor(30, 64, 175)
+    pdf.rect(0, 0, W, 18, 'F')
+    pdf.setTextColor(255, 255, 255)
+    pdf.setFontSize(13)
+    pdf.setFont('helvetica', 'bold')
+    pdf.text('Raman Sample Analyzer  |  Scan Report', margin, 12)
+
+    let y = 26
+
+    // Canvas snapshot — preserve actual aspect ratio, scale to fit within bounds
+    if (snapshot) {
+      try {
+        const imgProps = (pdf as unknown as { getImageProperties: (s: string) => { width: number; height: number } })
+          .getImageProperties(snapshot)
+        const ratio = imgProps.height / imgProps.width
+        const maxH = 110  // mm — cap so config still fits on page 1
+        let imgW = contentW
+        let imgH = imgW * ratio
+        if (imgH > maxH) { imgH = maxH; imgW = imgH / ratio }
+        const imgX = margin + (contentW - imgW) / 2
+        pdf.addImage(snapshot, 'PNG', imgX, y, imgW, imgH)
+        y += imgH + 7
+      } catch { /* skip if snapshot fails */ }
+    }
+
+    // ── Layout helpers ───────────────────────────────────────────────────────
+    const SEC_H   = 7
+    const ROW_H   = 5.5
+    const PAGE_BOT = footerY - 4
+
+    const newPage = () => { pdf.addPage(); y = margin + 4 }
+    const checkSpace = (needed: number) => { if (y + needed > PAGE_BOT) newPage() }
+
+    const section = (title: string, minRows = 1) => {
+      checkSpace(SEC_H + minRows * ROW_H)
+      pdf.setFillColor(226, 232, 240)
+      pdf.rect(margin, y, contentW, SEC_H - 1, 'F')
+      pdf.setTextColor(51, 65, 85)
+      pdf.setFontSize(7.5)
+      pdf.setFont('helvetica', 'bold')
+      pdf.text(title.toUpperCase(), margin + 3, y + 4.4)
+      y += SEC_H + 4
+    }
+
+    let rowIdx = 0
+    const row = (label: string, value: string) => {
+      checkSpace(ROW_H + 1)
+      if (rowIdx % 2 === 1) {
+        pdf.setFillColor(248, 250, 252)
+        pdf.rect(margin, y - 3.8, contentW, ROW_H, 'F')
+      }
+      rowIdx++
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(8.5)
+      pdf.setTextColor(71, 85, 105)
+      pdf.text(label, margin + 3, y)
+      pdf.setFont('helvetica', 'bold')
+      pdf.setTextColor(15, 23, 42)
+      pdf.text(value, margin + 80, y)
+      y += ROW_H
+    }
+
+    // ── Scan summary ─────────────────────────────────────────────────────────
+    rowIdx = 0
+    section('Scan Summary', 4)
+    row('Total points',  fmtCount(src.total_points))
+    row('Tiles',         String(src.passes.length))
+    row('Total area',    fmtArea(src.total_area_mm2))
+    row('Estimated time', fmtTime(src.estimated_time_minutes))
+    y += 3
+
+    // ── Sample shape ─────────────────────────────────────────────────────────
+    if (shape) {
+      rowIdx = 0
+      const shapeRows = shape.type === 'rectangle' ? 5 : shape.type === 'circle' ? 4 : 2
+      section('Sample Shape', shapeRows)
+      const typeLabel = shape.type === 'rectangle' ? 'Rectangle'
+        : shape.type === 'circle' ? 'Circle' : 'Custom polygon'
+      row('Shape type', typeLabel)
+      if (shape.type === 'rectangle' && shape.rect) {
+        row(`X origin (${displayUnit})`, umToDisplay(shape.rect.x,      displayUnit).toFixed(4))
+        row(`Y origin (${displayUnit})`, umToDisplay(shape.rect.y,      displayUnit).toFixed(4))
+        row(`Width (${displayUnit})`,    umToDisplay(shape.rect.width,  displayUnit).toFixed(4))
+        row(`Height (${displayUnit})`,   umToDisplay(shape.rect.height, displayUnit).toFixed(4))
+      } else if (shape.type === 'circle' && shape.circle) {
+        row(`Center X (${displayUnit})`, umToDisplay(shape.circle.cx,     displayUnit).toFixed(4))
+        row(`Center Y (${displayUnit})`, umToDisplay(shape.circle.cy,     displayUnit).toFixed(4))
+        row(`Radius (${displayUnit})`,   umToDisplay(shape.circle.radius, displayUnit).toFixed(4))
+      } else if (shape.type === 'freeform' && shape.freeform) {
+        row('Vertices', String(shape.freeform.points.length))
+      }
+      y += 3
+    }
+
+    // ── Scan parameters ───────────────────────────────────────────────────────
+    if (scanParams) {
+      rowIdx = 0
+      section('Scan Parameters', 3)
+      row(`Step X (${displayUnit})`, umToDisplay(scanParams.step_x, displayUnit).toFixed(4))
+      row(`Step Y (${displayUnit})`, umToDisplay(scanParams.step_y, displayUnit).toFixed(4))
+      row('Point overlap',           `${(scanParams.overlap * 100).toFixed(0)}%`)
+      y += 3
+    }
+
+    // ── Stage constraints ─────────────────────────────────────────────────────
+    if (stage) {
+      rowIdx = 0
+      section('Stage Constraints', 4)
+      row(`Max scan width (${displayUnit})`,  umToDisplay(stage.max_scan_width,  displayUnit).toFixed(4))
+      row(`Max scan height (${displayUnit})`, umToDisplay(stage.max_scan_height, displayUnit).toFixed(4))
+      row('Time per point',  `${stage.time_per_point_seconds} s`)
+      row('Tile overlap',    `${(stage.tile_overlap * 100).toFixed(0)}%`)
+      y += 3
+    }
+
+    // ── Tiles table ───────────────────────────────────────────────────────────
+    section('Tiles', 3)
+
+    const dec = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!.decimals
+    const C = {
+      tile:   margin + 2,
+      pts:    margin + 22,
+      startX: margin + 46,
+      startY: margin + 90,
+      stepX:  margin + 131,
+      stepY:  margin + 153,
+    }
+
+    const drawTileHeader = () => {
+      pdf.setFont('helvetica', 'bold')
+      pdf.setFontSize(7.5)
+      pdf.setTextColor(100, 116, 139)
+      pdf.text('Tile',                      C.tile,   y)
+      pdf.text('Points',                    C.pts,    y)
+      pdf.text(`Start X (${displayUnit})`,  C.startX, y)
+      pdf.text(`Start Y (${displayUnit})`,  C.startY, y)
+      pdf.text(`Step X (${displayUnit})`,   C.stepX,  y)
+      pdf.text(`Step Y (${displayUnit})`,   C.stepY,  y)
+      y += 3.5
+      pdf.setDrawColor(203, 213, 225)
+      pdf.line(margin, y, margin + contentW, y)
+      y += 3
+    }
+
+    drawTileHeader()
+
+    src.passes.forEach((pass, idx) => {
+      if (y > PAGE_BOT) {
+        newPage()
+        drawTileHeader()
+      }
+      if (idx % 2 === 1) {
+        pdf.setFillColor(248, 250, 252)
+        pdf.rect(margin, y - 3.5, contentW, 5, 'F')
+      }
+      pdf.setFont('helvetica', 'normal')
+      pdf.setFontSize(8)
+      pdf.setTextColor(15, 23, 42)
+      pdf.text(`Tile ${pass.pass_number}`,                                     C.tile,   y)
+      pdf.text(fmtCount(pass.total_points),                                    C.pts,    y)
+      pdf.text(umToDisplay(pass.start_point.x, displayUnit).toFixed(dec),      C.startX, y)
+      pdf.text(umToDisplay(pass.start_point.y, displayUnit).toFixed(dec),      C.startY, y)
+      pdf.text(umToDisplay(pass.delta_x,        displayUnit).toFixed(dec),     C.stepX,  y)
+      pdf.text(umToDisplay(pass.delta_y,        displayUnit).toFixed(dec),     C.stepY,  y)
+      y += 5
+    })
+
+    // ── Warnings ──────────────────────────────────────────────────────────────
+    if (src.warnings.length > 0) {
+      y += 3
+      rowIdx = 0
+      section('Warnings', src.warnings.length)
+      src.warnings.forEach((w) => {
+        checkSpace(ROW_H * 2)
+        pdf.setFont('helvetica', 'normal')
+        pdf.setFontSize(8)
+        pdf.setTextColor(180, 83, 9)
+        const lines = pdf.splitTextToSize(`! ${w}`, contentW - 6) as string[]
+        pdf.text(lines, margin + 3, y)
+        y += lines.length * ROW_H
+      })
+    }
+
+    // ── Footer on every page ──────────────────────────────────────────────────
+    const pageCount = (pdf as unknown as { internal: { getNumberOfPages: () => number } })
+      .internal.getNumberOfPages()
+    for (let i = 1; i <= pageCount; i++) {
+      pdf.setPage(i)
+      pdf.setFillColor(241, 245, 249)
+      pdf.rect(0, footerY, W, H - footerY, 'F')
+      pdf.setDrawColor(203, 213, 225)
+      pdf.line(margin, footerY, W - margin, footerY)
+      pdf.setFontSize(7)
+      pdf.setTextColor(148, 163, 184)
+      pdf.setFont('helvetica', 'normal')
+      pdf.text(`Generated by Raman Sample Analyzer  ${new Date().toLocaleString()}`, margin, footerY + 5)
+      pdf.text(`Page ${i} / ${pageCount}`, W - margin, footerY + 5, { align: 'right' })
+    }
+
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    pdf.save(`ScanReport-${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}.pdf`)
   }
 
   if (isLoading) {
@@ -146,14 +407,30 @@ export default function ScanResults({
   return (
     <div className="space-y-2.5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-1">
         <h3 className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 dark:text-[#888]">Scan Parameters</h3>
-        <button
-          onClick={handleCopy}
-          className="text-[10px] px-2 py-1 rounded border border-gray-200 dark:border-[#3a3a3a] text-gray-500 dark:text-[#888] hover:border-blue-400 hover:text-blue-500 dark:hover:border-[#4a9eff] dark:hover:text-[#4a9eff] transition-colors"
-        >
-          {copied ? '✓ Copied' : 'Copy all'}
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={handleCopy}
+            className="text-[10px] px-2 py-1 rounded border border-gray-200 dark:border-[#3a3a3a] text-gray-500 dark:text-[#888] hover:border-blue-400 hover:text-blue-500 dark:hover:border-[#4a9eff] dark:hover:text-[#4a9eff] transition-colors"
+          >
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+          <button
+            onClick={handleExportCsv}
+            title="Export scan points as CSV"
+            className="text-[10px] px-2 py-1 rounded border border-green-400 text-green-600 dark:border-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+          >
+            CSV
+          </button>
+          <button
+            onClick={handleExportPdf}
+            title="Export report as PDF"
+            className="text-[10px] px-2 py-1 rounded border border-red-400 text-red-600 dark:border-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            PDF
+          </button>
+        </div>
       </div>
 
       {/* Warnings */}
@@ -227,10 +504,10 @@ export default function ScanResults({
                   <p className="text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-500">Alignment angles</p>
                   <div className="flex gap-4">
                     <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300">
-                      → X: <strong>{rotationOptimum.angle_deg}°</strong>
+                      X: <strong>{rotationOptimum.angle_deg}°</strong>
                     </span>
                     <span className="text-[10px] font-mono text-amber-700 dark:text-amber-300">
-                      ↑ Y: <strong>{+(90 - rotationOptimum.angle_deg).toFixed(1)}°</strong>
+                      Y: <strong>{+(90 - rotationOptimum.angle_deg).toFixed(1)}°</strong>
                     </span>
                   </div>
                 </div>

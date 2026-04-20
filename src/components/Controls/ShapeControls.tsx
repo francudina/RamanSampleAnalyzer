@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type {
   CircleParams,
   DrawMode,
+  ExclusionZone,
   FullConfig,
   RectParams,
   SampleShape,
@@ -30,6 +31,7 @@ interface Props {
   targetNx: number
   targetNy: number
   rotationOptimizerEnabled: boolean
+  exclusionZones?: ExclusionZone[]
   onDrawModeChange: (mode: DrawMode) => void
   onShapeChange: (shape: SampleShape) => void
   onClear: () => void
@@ -110,6 +112,7 @@ export default function ShapeControls({
   targetNx,
   targetNy,
   rotationOptimizerEnabled,
+  exclusionZones,
   onDrawModeChange,
   onShapeChange,
   onClear,
@@ -171,6 +174,7 @@ export default function ShapeControls({
       targetNx,
       targetNy,
       rotationOptimizerEnabled,
+      exclusionZones: exclusionZones ?? [],
     }
 
     const now = new Date()
@@ -234,6 +238,9 @@ export default function ShapeControls({
           targetNx: raw.targetNx ?? 10,
           targetNy: raw.targetNy ?? 10,
           rotationOptimizerEnabled: raw.rotationOptimizerEnabled ?? false,
+          exclusionZones: Array.isArray(raw.exclusionZones)
+            ? raw.exclusionZones.filter((z: ExclusionZone) => z.id && Array.isArray(z.points))
+            : [],
         }
 
         onImportConfig(config)
