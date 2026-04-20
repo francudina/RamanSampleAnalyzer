@@ -8,6 +8,7 @@ import StageSettings from './components/Controls/StageSettings'
 import ScanResults from './components/Output/ScanResults'
 import type {
   DrawMode,
+  FullConfig,
   SampleShape,
   ScanParameters,
   ScanResult,
@@ -208,6 +209,24 @@ export default function App() {
       if (prev === null) setHasGenerated(false)
       return h.slice(0, -1)
     })
+  }, [])
+
+  const handleImportConfig = useCallback((config: FullConfig) => {
+    const { displayUnit: du, shape: s, scanParams: sp, stage: st,
+            scanInputMode: sim, targetNx: nx, targetNy: ny,
+            rotationOptimizerEnabled: rot } = config
+    setShapeHistory([])
+    if (s) setShape(s)
+    setScanParams(sp)
+    setStage(st)
+    setDisplayUnit(du as DisplayUnit)
+    setScanInputMode(sim)
+    setTargetNx(nx)
+    setTargetNy(ny)
+    setRotationOptimizerEnabled(rot)
+    setScanResult(null)
+    setError(null)
+    setHasGenerated(false)
   }, [])
 
   // Ctrl+Z / Cmd+Z undo
@@ -529,9 +548,16 @@ export default function App() {
                 shape={shape}
                 drawMode={drawMode}
                 displayUnit={displayUnit}
+                scanParams={scanParams}
+                stage={stage}
+                scanInputMode={scanInputMode}
+                targetNx={targetNx}
+                targetNy={targetNy}
+                rotationOptimizerEnabled={rotationOptimizerEnabled}
                 onDrawModeChange={setDrawMode}
                 onShapeChange={handleShapeChange}
                 onClear={handleClear}
+                onImportConfig={handleImportConfig}
               />
             </CollapsiblePanel>
 

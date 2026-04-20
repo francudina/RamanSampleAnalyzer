@@ -106,6 +106,21 @@ export type DrawState =
   | { mode: 'drawing_circle'; cx: number; cy: number }
   | { mode: 'drawing_freeform'; points: Point[]; preview: Point | null; anchorIndex?: number }
 
+// ── Full session config (export / import) ─────────────────────────────────────
+
+export interface FullConfig {
+  version: 1
+  unit: string
+  shape: SampleShape | null
+  scanParams: ScanParameters
+  stage: StageConstraints
+  displayUnit: string
+  scanInputMode: 'step' | 'count'
+  targetNx: number
+  targetNy: number
+  rotationOptimizerEnabled: boolean
+}
+
 // ── Rotation optimizer ─────────────────────────────────────────────────────────
 
 export interface RotationOptimum {

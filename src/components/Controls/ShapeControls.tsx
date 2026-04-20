@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type {
   CircleParams,
   DrawMode,
+  FullConfig,
   RectParams,
   SampleShape,
+  ScanParameters,
   ShapeType,
+  StageConstraints,
 } from '../../types/scan'
 import {
   type DisplayUnit,
@@ -20,9 +24,16 @@ interface Props {
   shape: SampleShape | null
   drawMode: DrawMode
   displayUnit: DisplayUnit
+  scanParams: ScanParameters
+  stage: StageConstraints
+  scanInputMode: 'step' | 'count'
+  targetNx: number
+  targetNy: number
+  rotationOptimizerEnabled: boolean
   onDrawModeChange: (mode: DrawMode) => void
   onShapeChange: (shape: SampleShape) => void
   onClear: () => void
+  onImportConfig: (config: FullConfig) => void
 }
 
 const shapeTypes: { label: string; value: ShapeType; hint: string }[] = [
@@ -93,9 +104,16 @@ export default function ShapeControls({
   shape,
   drawMode,
   displayUnit,
+  scanParams,
+  stage,
+  scanInputMode,
+  targetNx,
+  targetNy,
+  rotationOptimizerEnabled,
   onDrawModeChange,
   onShapeChange,
   onClear,
+  onImportConfig,
 }: Props) {
   const activeShapeType = shape?.type ?? null
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -103,20 +121,58 @@ export default function ShapeControls({
   const [pointsExpanded, setPointsExpanded] = useState(false)
   const POINTS_PREVIEW = 4
   const importRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showError = (msg: string) => {
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
+    setImportError(msg)
+    errorTimerRef.current = setTimeout(() => setImportError(null), 3000)
+  }
+
+  useEffect(() => () => { if (errorTimerRef.current) clearTimeout(errorTimerRef.current) }, [])
 
   const handleExport = () => {
-    if (!shape) return
     const c = (um: number) => umToDisplay(um, displayUnit)
-    let payload: Record<string, unknown> = { unit: displayUnit, type: shape.type }
-    if (shape.type === 'rectangle' && shape.rect) {
-      const r = shape.rect
-      payload.rect = { x: c(r.x), y: c(r.y), width: c(r.width), height: c(r.height) }
-    } else if (shape.type === 'circle' && shape.circle) {
-      const ci = shape.circle
-      payload.circle = { cx: c(ci.cx), cy: c(ci.cy), radius: c(ci.radius) }
-    } else if (shape.type === 'freeform' && shape.freeform) {
-      payload.freeform = { points: shape.freeform.points.map((p) => ({ x: c(p.x), y: c(p.y) })) }
+
+    const convertShape = (s: SampleShape | null): SampleShape | null => {
+      if (!s) return null
+      if (s.type === 'rectangle' && s.rect) {
+        const r = s.rect
+        return { type: 'rectangle', rect: { x: c(r.x), y: c(r.y), width: c(r.width), height: c(r.height) } }
+      }
+      if (s.type === 'circle' && s.circle) {
+        const ci = s.circle
+        return { type: 'circle', circle: { cx: c(ci.cx), cy: c(ci.cy), radius: c(ci.radius) } }
+      }
+      if (s.type === 'freeform' && s.freeform) {
+        return { type: 'freeform', freeform: { points: s.freeform.points.map((p) => ({ x: c(p.x), y: c(p.y) })) } }
+      }
+      return s
     }
+
+    const payload: FullConfig = {
+      version: 1,
+      unit: displayUnit,
+      displayUnit,
+      shape: convertShape(shape),
+      scanParams: {
+        step_x: c(scanParams.step_x),
+        step_y: c(scanParams.step_y),
+        overlap: scanParams.overlap,
+      },
+      stage: {
+        max_scan_width: c(stage.max_scan_width),
+        max_scan_height: c(stage.max_scan_height),
+        time_per_point_seconds: stage.time_per_point_seconds,
+        tile_overlap: stage.tile_overlap,
+      },
+      scanInputMode,
+      targetNx,
+      targetNy,
+      rotationOptimizerEnabled,
+    }
+
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const datetime =
@@ -141,21 +197,48 @@ export default function ShapeControls({
         const validUnits: DisplayUnit[] = ['nm', 'µm', 'mm', 'cm']
         const fileUnit: DisplayUnit = validUnits.includes(raw.unit) ? raw.unit : 'µm'
         const c = (val: number) => displayToUm(val, fileUnit)
-        let imported: SampleShape | null = null
-        if (raw.type === 'rectangle' && raw.rect) {
-          const r = raw.rect
-          imported = { type: 'rectangle', rect: { x: c(r.x), y: c(r.y), width: c(r.width), height: c(r.height) } }
-        } else if (raw.type === 'circle' && raw.circle) {
-          const ci = raw.circle
-          imported = { type: 'circle', circle: { cx: c(ci.cx), cy: c(ci.cy), radius: c(ci.radius) } }
-        } else if (raw.type === 'freeform' && Array.isArray(raw.freeform?.points)) {
-          imported = { type: 'freeform', freeform: { points: raw.freeform.points.map((p: { x: number; y: number }) => ({ x: c(p.x), y: c(p.y) })) } }
+
+        const convertShape = (s: SampleShape | null): SampleShape | null => {
+          if (!s) return null
+          if (s.type === 'rectangle' && s.rect) {
+            const r = s.rect
+            return { type: 'rectangle', rect: { x: c(r.x), y: c(r.y), width: c(r.width), height: c(r.height) } }
+          }
+          if (s.type === 'circle' && s.circle) {
+            const ci = s.circle
+            return { type: 'circle', circle: { cx: c(ci.cx), cy: c(ci.cy), radius: c(ci.radius) } }
+          }
+          if (s.type === 'freeform' && Array.isArray(s.freeform?.points)) {
+            return { type: 'freeform', freeform: { points: s.freeform!.points.map((p) => ({ x: c(p.x), y: c(p.y) })) } }
+          }
+          return null
         }
-        if (!imported) { alert('Invalid shape file: missing or unknown shape type.'); return }
-        onShapeChange(imported)
-        analytics.shapeTypeSelected(imported.type)
+
+        const config: FullConfig = {
+          version: 1,
+          unit: fileUnit,
+          displayUnit: validUnits.includes(raw.displayUnit) ? raw.displayUnit : fileUnit,
+          shape: convertShape(raw.shape ?? null),
+          scanParams: raw.scanParams ? {
+            step_x: c(raw.scanParams.step_x),
+            step_y: c(raw.scanParams.step_y),
+            overlap: raw.scanParams.overlap ?? 0,
+          } : { step_x: c(5), step_y: c(5), overlap: 0 },
+          stage: raw.stage ? {
+            max_scan_width: c(raw.stage.max_scan_width),
+            max_scan_height: c(raw.stage.max_scan_height),
+            time_per_point_seconds: raw.stage.time_per_point_seconds ?? 1,
+            tile_overlap: raw.stage.tile_overlap ?? 0,
+          } : { max_scan_width: c(50), max_scan_height: c(50), time_per_point_seconds: 1, tile_overlap: 0 },
+          scanInputMode: raw.scanInputMode === 'count' ? 'count' : 'step',
+          targetNx: raw.targetNx ?? 10,
+          targetNy: raw.targetNy ?? 10,
+          rotationOptimizerEnabled: raw.rotationOptimizerEnabled ?? false,
+        }
+
+        onImportConfig(config)
       } catch {
-        alert('Failed to parse shape file. Make sure it is a valid CustomShape JSON.')
+        showError('Make sure the file is a valid CustomShape JSON.')
       } finally {
         if (importRef.current) importRef.current.value = ''
       }
@@ -207,6 +290,7 @@ export default function ShapeControls({
   const idleBtn = 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-[#3a3a3a] dark:bg-[#2c2c2c] dark:text-[#888] dark:hover:bg-[#333] dark:hover:text-[#bbb]'
 
   return (
+    <>
     <section className="space-y-4">
 
       {/* Draw tools */}
@@ -527,5 +611,26 @@ export default function ShapeControls({
         </Tooltip>
       )}
     </section>
+
+    {importError && createPortal(
+
+      <div className="fixed top-4 right-4 z-[9999] flex items-start gap-2.5 max-w-xs px-3.5 py-2.5 rounded-lg shadow-lg border border-red-300 bg-red-50 dark:bg-[#2a1414] dark:border-red-800 animate-fade-in">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 shrink-0 mt-px text-red-500 dark:text-red-400">
+          <circle cx="8" cy="8" r="6.5" />
+          <path d="M8 5v3.5M8 11h.01" strokeWidth="1.8" />
+        </svg>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-red-700 dark:text-red-300">Import failed</p>
+          <p className="text-[11px] text-red-600 dark:text-red-400 mt-0.5 leading-snug">{importError}</p>
+        </div>
+        <button onClick={() => setImportError(null)} className="shrink-0 text-red-400 hover:text-red-600 dark:text-red-500 dark:hover:text-red-300 ml-1 leading-none">
+          <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="w-3 h-3">
+            <path d="M2 2l8 8M10 2l-8 8" />
+          </svg>
+        </button>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
