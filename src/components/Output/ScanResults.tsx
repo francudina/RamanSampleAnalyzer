@@ -147,7 +147,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
         ))}
         {result.requires_multiple_passes && (
           <div className="pt-1 border-t border-gray-200 dark:border-[#333] text-[10px] text-amber-600 dark:text-amber-400">
-            {result.passes.length} passes — reposition stage between each pass.
+            {result.passes.length} passes, reposition stage between each pass.
           </div>
         )}
       </div>
@@ -197,31 +197,33 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
                 </button>
               </div>
             </div>
-            <div className="px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-2 bg-white dark:bg-[#252525]">
-              {[
-                { label: 'Start X', val: fmt(pass.start_point.x) },
-                { label: 'Start Y', val: fmt(pass.start_point.y) },
-                { label: 'Step X', val: fmt(pass.delta_x) },
-                { label: 'Step Y', val: fmt(pass.delta_y) },
-                { label: 'Dots X', val: fmtCount(pass.nx) },
-                { label: 'Dots Y', val: fmtCount(pass.ny) },
-              ].map(({ label, val }) => (
-                <div key={label}>
-                  <span className="text-[9px] text-gray-400 dark:text-[#666] uppercase tracking-wide block">{label}</span>
-                  <span className="text-xs font-mono text-gray-800 dark:text-[#d4d4d4]">{val}</span>
-                </div>
-              ))}
-              {/* Points — full width, prominent */}
-              <div className="col-span-2 border-t border-gray-200 dark:border-[#333] pt-1.5 mt-0.5">
-                <span className="text-[9px] text-gray-400 dark:text-[#666] uppercase tracking-wide block">Points</span>
-                <span className="text-xs font-mono text-gray-800 dark:text-[#d4d4d4]">
-                  {fmtCount(pass.total_points)}
-                  <span className="text-[9px] text-gray-400 dark:text-[#666] ml-1.5">({pass.nx} cols × {pass.ny} rows)</span>
-                </span>
-              </div>
-              <div className="col-span-2 border-t border-gray-200 dark:border-[#333] pt-1.5 mt-0.5">
-                <span className="text-[9px] text-gray-400 dark:text-[#666] uppercase tracking-wide block">Area</span>
-                <span className="text-[11px] font-mono text-gray-600 dark:text-[#aaa]">{fmtAreaDisplay(pass.area_mm2 * 1e6, displayUnit)}</span>
+            <div className="px-3 py-2 bg-white dark:bg-[#252525]">
+              {/* Table: rows = Start/Step/Dots, cols = X/Y */}
+              <table className="w-full text-xs">
+                <thead>
+                  <tr>
+                    <th className="text-left text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666] pb-1 w-10"></th>
+                    <th className="text-right text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666] pb-1">X</th>
+                    <th className="text-right text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666] pb-1">Y</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: 'Start', x: fmt(pass.start_point.x), y: fmt(pass.start_point.y) },
+                    { label: 'Step',  x: fmt(pass.delta_x),       y: fmt(pass.delta_y)       },
+                    { label: 'Dots',  x: fmtCount(pass.nx),       y: fmtCount(pass.ny)       },
+                  ].map(({ label, x, y }) => (
+                    <tr key={label}>
+                      <td className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666] py-0.5">{label}</td>
+                      <td className="text-right font-mono text-gray-800 dark:text-[#d4d4d4] py-0.5">{x}</td>
+                      <td className="text-right font-mono text-gray-800 dark:text-[#d4d4d4] py-0.5">{y}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="border-t border-gray-200 dark:border-[#333] pt-1.5 mt-1.5 flex justify-between text-xs">
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666]">Area</span>
+                <span className="font-mono text-gray-600 dark:text-[#aaa]">{fmtAreaDisplay(pass.area_mm2 * 1e6, displayUnit)}</span>
               </div>
             </div>
           </div>

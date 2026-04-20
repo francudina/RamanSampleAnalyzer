@@ -58,7 +58,8 @@ function sciStr(value: number, decimals: number): string {
   }
   const expSign = exp < 0 ? '⁻' : ''
   const expStr = String(Math.abs(exp)).split('').map((d) => SUP[+d]).join('')
-  return `${sign}${mantissa.toFixed(decimals)}×10${expSign}${expStr}`
+  const mantissaStr = mantissa.toFixed(decimals).replace(/\.?0+$/, '')
+  return `${sign}${mantissaStr}×10${expSign}${expStr}`
 }
 
 /** Returns true when the value is outside the "comfortable" reading range. */
@@ -67,9 +68,13 @@ function needsSci(value: number): boolean {
   return abs !== 0 && (abs >= 10_000 || abs < 0.001)
 }
 
-/** Format a number, switching to scientific notation for extreme values. */
+/** Format a number, switching to scientific notation for extreme values.
+ *  Trailing zeros after the decimal point are stripped (e.g. 100.0000 → 100). */
 function fmt(value: number, decimals: number): string {
-  return needsSci(value) ? sciStr(value, decimals) : value.toFixed(decimals)
+  if (needsSci(value)) return sciStr(value, decimals)
+  const fixed = value.toFixed(decimals)
+  // Remove trailing zeros and a trailing decimal point
+  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed
 }
 
 // ── Public formatters ──────────────────────────────────────────────────────────
