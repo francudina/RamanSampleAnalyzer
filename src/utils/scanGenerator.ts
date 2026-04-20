@@ -154,6 +154,72 @@ function generatePass(
   }
 }
 
+// ── Shape inset ────────────────────────────────────────────────────────────────
+
+function signedArea(pts: Point[]): number {
+  let area = 0
+  const n = pts.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y
+  }
+  return area / 2
+}
+
+function insetPolygon(pts: Point[], offset: number): Point[] {
+  const n = pts.length
+  if (n < 3) return pts
+  // Ensure CCW winding so left-normals point inward
+  const sa = signedArea(pts)
+  const ordered = sa < 0 ? [...pts].reverse() : pts
+  const result: Point[] = []
+  for (let i = 0; i < n; i++) {
+    const prev = ordered[(i - 1 + n) % n]
+    const curr = ordered[i]
+    const next = ordered[(i + 1) % n]
+    const e1 = { x: curr.x - prev.x, y: curr.y - prev.y }
+    const e2 = { x: next.x - curr.x, y: next.y - curr.y }
+    const len1 = Math.sqrt(e1.x ** 2 + e1.y ** 2) || 1
+    const len2 = Math.sqrt(e2.x ** 2 + e2.y ** 2) || 1
+    // Left normal = inward for CCW polygon
+    const ni1 = { x: -e1.y / len1, y: e1.x / len1 }
+    const ni2 = { x: -e2.y / len2, y: e2.x / len2 }
+    const bis = { x: ni1.x + ni2.x, y: ni1.y + ni2.y }
+    const bisLen = Math.sqrt(bis.x ** 2 + bis.y ** 2)
+    if (bisLen < 1e-9) {
+      result.push({ x: curr.x + ni1.x * offset, y: curr.y + ni1.y * offset })
+    } else {
+      const scale = offset / bisLen
+      result.push({ x: curr.x + bis.x * scale, y: curr.y + bis.y * scale })
+    }
+  }
+  return sa < 0 ? result.reverse() : result
+}
+
+function insetShape(shape: SampleShape, offsetUm: number): SampleShape {
+  if (offsetUm <= 0) return shape
+  if (shape.type === 'rectangle' && shape.rect) {
+    const r = shape.rect
+    return {
+      type: 'rectangle',
+      rect: {
+        x: r.x + offsetUm,
+        y: r.y + offsetUm,
+        width: Math.max(0, r.width - 2 * offsetUm),
+        height: Math.max(0, r.height - 2 * offsetUm),
+      },
+    }
+  }
+  if (shape.type === 'circle' && shape.circle) {
+    const c = shape.circle
+    return { type: 'circle', circle: { ...c, radius: Math.max(0, c.radius - offsetUm) } }
+  }
+  if (shape.type === 'freeform' && shape.freeform) {
+    return { type: 'freeform', freeform: { points: insetPolygon(shape.freeform.points, offsetUm) } }
+  }
+  return shape
+}
+
 // ── Public entry point ─────────────────────────────────────────────────────────
 
 export function generateScanGrid(
@@ -161,6 +227,7 @@ export function generateScanGrid(
   scanParams: ScanParameters,
   stage: StageConstraints,
   exclusionZones?: ExclusionZone[],
+  innerOffsetUm = 0,
 ): ScanResult {
   const warnings: string[] = []
 
@@ -195,12 +262,35 @@ export function generateScanGrid(
   }
 
   const exZonePts = exclusionZones?.map((z) => z.points)
-  const rawPasses: ScanPass[] = regions.map((region, i) =>
-    generatePass(i + 1, region, effStepX, effStepY, shape, exZonePts),
-  )
+  const effectiveShape = insetShape(shape, innerOffsetUm)
+  // Clip each tile region to the inset shape's bbox so the grid starts exactly at the offset boundary
+  const effectiveBounds = innerOffsetUm > 0 ? getBoundingBox(effectiveShape) : null
+  const rawPasses: ScanPass[] = regions.map((region, i) => {
+    const r: [number, number, number, number] = effectiveBounds
+      ? [
+          Math.max(region[0], effectiveBounds[0]),
+          Math.max(region[1], effectiveBounds[1]),
+          Math.min(region[2], effectiveBounds[2]),
+          Math.min(region[3], effectiveBounds[3]),
+        ]
+      : region
+    return generatePass(i + 1, r, effStepX, effStepY, effectiveShape, exZonePts)
+  })
+
+  // Deduplicate: remove points already claimed by an earlier tile
+  const seenPts = new Set<string>()
+  const dedupedPasses = rawPasses.map((pass) => {
+    const unique = pass.grid_points.filter((pt) => {
+      const key = `${pt.x},${pt.y}`
+      if (seenPts.has(key)) return false
+      seenPts.add(key)
+      return true
+    })
+    return { ...pass, grid_points: unique, total_points: unique.length }
+  })
 
   // Remove tiles where no scan point falls inside the shape, then renumber
-  const passes: ScanPass[] = rawPasses
+  const passes: ScanPass[] = dedupedPasses
     .filter((p) => p.total_points > 0)
     .map((p, i) => ({ ...p, pass_number: i + 1 }))
 

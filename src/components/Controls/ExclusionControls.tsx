@@ -27,7 +27,7 @@ export default function ExclusionControls({
   return (
     <section className="space-y-3">
       {/* Draw button */}
-      <Tooltip text="Draw a freeform exclusion zone. Scan points inside will be skipped" side="right">
+      <Tooltip text="Draw zones over damaged areas, mounting clips, or substrate regions to skip them during scanning. Treated as holes in the sample.">
         <button
           onClick={() => onDrawModeChange(isDrawing ? 'select' : 'exclusion')}
           className={`w-full flex items-center justify-center gap-2 px-4 py-1.5 rounded border text-xs font-semibold transition-colors ${isDrawing ? activeBtn : idleBtn}`}
@@ -88,11 +88,7 @@ export default function ExclusionControls({
         </Tooltip>
       )}
 
-      {exclusionZones.length === 0 && !isDrawing && (
-        <p className="text-[10px] text-gray-400 dark:text-[#555] leading-relaxed">
-          No exclusion zones. Draw zones over damaged areas, mounting clips, or substrate regions to skip them during scanning.
-        </p>
-      )}
+      {exclusionZones.length === 0 && !isDrawing && null}
     </section>
   )
 }

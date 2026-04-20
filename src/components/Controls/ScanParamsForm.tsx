@@ -13,12 +13,14 @@ interface Props {
   params: ScanParameters
   displayUnit: DisplayUnit
   onChange: (params: ScanParameters) => void
-  inputMode: 'step' | 'count'
-  onInputModeChange: (mode: 'step' | 'count') => void
+  inputMode: 'step' | 'count' | 'total'
+  onInputModeChange: (mode: 'step' | 'count' | 'total') => void
   targetNx: number
   targetNy: number
   onTargetNxChange: (n: number) => void
   onTargetNyChange: (n: number) => void
+  targetTotal: number
+  onTargetTotalChange: (n: number) => void
 }
 
 const INPUT_CLS =
@@ -77,6 +79,7 @@ export default function ScanParamsForm({
   params, displayUnit, onChange,
   inputMode, onInputModeChange,
   targetNx, targetNy, onTargetNxChange, onTargetNyChange,
+  targetTotal, onTargetTotalChange,
 }: Props) {
   const set = (patch: Partial<ScanParameters>) => onChange({ ...params, ...patch })
   const opts = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!
@@ -86,7 +89,7 @@ export default function ScanParamsForm({
 
       {/* Mode toggle */}
       <div className="flex rounded border border-gray-200 dark:border-[#3a3a3a] overflow-hidden text-[10px] font-semibold uppercase tracking-wide">
-        {(['step', 'count'] as const).map((m) => (
+        {(['step', 'count', 'total'] as const).map((m) => (
           <button
             key={m}
             onClick={() => onInputModeChange(m)}
@@ -96,7 +99,7 @@ export default function ScanParamsForm({
                 : 'text-gray-500 dark:text-[#888] hover:bg-gray-100 dark:hover:bg-[#2a2a2a]'
             }`}
           >
-            {m === 'step' ? 'Offset' : 'Dot Count'}
+            {m === 'step' ? 'Offset' : m === 'count' ? 'Grid' : 'Total'}
           </button>
         ))}
       </div>
@@ -128,11 +131,11 @@ export default function ScanParamsForm({
             </div>
           </div>
         </Tooltip>
-      ) : (
-        /* ── Dot count mode ────────────────────────────────────────────────── */
-        <Tooltip text="Number of scan points along X and Y axes. Step size is computed from the stage max scan area." side="right">
+      ) : inputMode === 'count' ? (
+        /* ── Grid mode ─────────────────────────────────────────────────────── */
+        <Tooltip text="Number of scan points along X and Y axes. Step size is computed from the shape bounding box." side="right">
           <div className="space-y-0.5">
-            <span className={LABEL_CLS}>Dot Count</span>
+            <span className={LABEL_CLS}>Grid</span>
             <div className={ROW_CLS + ' w-full'}>
               <span className={AXIS_CLS + ' w-4 shrink-0'}>X</span>
               <NumericInput
@@ -158,7 +161,26 @@ export default function ScanParamsForm({
             </p>
           </div>
         </Tooltip>
-      )}
+      ) : inputMode === 'total' ? (
+        /* ── Total dots mode ───────────────────────────────────────────────── */
+        <Tooltip text="Enter total number of scan points. Grid dimensions (Nx × Ny) are calculated from shape aspect ratio." side="right">
+          <div className="space-y-0.5">
+            <span className={LABEL_CLS}>Total Dots</span>
+            <div className={ROW_CLS + ' w-full'}>
+              <NumericInput
+                value={targetTotal}
+                onChange={(v) => onTargetTotalChange(Math.max(1, Math.round(v)))}
+                step={1}
+                className={INPUT_CLS + ' flex-1'}
+              />
+              <span className={AXIS_CLS + ' w-10 text-right shrink-0'}>dots</span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-[#555] px-1 pt-0.5 leading-relaxed">
+              Grid is auto-calculated from shape aspect ratio at generate time.
+            </p>
+          </div>
+        </Tooltip>
+      ) : null}
 
       {/* Overlap */}
       <div className="flex flex-col gap-1">

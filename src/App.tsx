@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { generateScanGrid } from './utils/scanGenerator'
+import { generateScanGrid, getBoundingBox } from './utils/scanGenerator'
 import { findOptimalRotation, getRotatedFreeformShape } from './utils/tilingPlanner'
 import SampleCanvas from './components/Canvas/SampleCanvas'
 import ShapeControls from './components/Controls/ShapeControls'
@@ -7,9 +7,12 @@ import ExclusionControls from './components/Controls/ExclusionControls'
 import ScanParamsForm from './components/Controls/ScanParamsForm'
 import StageSettings from './components/Controls/StageSettings'
 import ScanResults from './components/Output/ScanResults'
+import FrameControls from './components/Controls/FrameControls'
+import Tooltip from './components/UI/Tooltip'
 import type {
   DrawMode,
   ExclusionZone,
+  FrameSegment,
   FullConfig,
   Point,
   SampleShape,
@@ -21,7 +24,9 @@ import type {
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
+  displayToUm,
   mmToUm,
+  umToDisplay,
 } from './utils/units'
 import { analytics } from './utils/analytics'
 
@@ -40,13 +45,49 @@ const DEFAULT_STAGE: StageConstraints = {
 
 // ── Collapsible panel ─────────────────────────────────────────────────────────
 
+const INPUT_CLS_SHARED =
+  'bg-white border border-gray-200 rounded px-2 py-0.5 text-xs text-gray-800 font-mono ' +
+  'focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 transition-colors ' +
+  'dark:bg-[#2c2c2c] dark:border-[#3a3a3a] dark:text-[#d4d4d4] dark:focus:border-[#4a9eff] dark:focus:ring-[#4a9eff]/30'
+
+function OffsetInput({ valueUm, displayUnit, onChange }: { valueUm: number; displayUnit: DisplayUnit; onChange: (um: number) => void }) {
+  const fmt = (um: number) => String(umToDisplay(um, displayUnit))
+  const [raw, setRaw] = useState(() => fmt(valueUm))
+  const prev = useRef(valueUm)
+  useEffect(() => {
+    if (valueUm !== prev.current) {
+      prev.current = valueUm
+      setRaw(fmt(valueUm))
+    }
+  }, [valueUm, displayUnit])
+  return (
+    <input
+      type="number" min={0} step={0.1}
+      value={raw}
+      className={INPUT_CLS_SHARED + ' w-20'}
+      onChange={(e) => {
+        setRaw(e.target.value)
+        const n = parseFloat(e.target.value)
+        if (!isNaN(n) && n >= 0) { prev.current = displayToUm(n, displayUnit); onChange(displayToUm(n, displayUnit)) }
+      }}
+      onBlur={() => {
+        const n = parseFloat(raw)
+        if (isNaN(n) || n < 0) setRaw(fmt(valueUm))
+        else { const um = displayToUm(n, displayUnit); prev.current = um; setRaw(fmt(um)) }
+      }}
+    />
+  )
+}
+
 function CollapsiblePanel({
   title,
   defaultOpen = true,
+  info,
   children,
 }: {
   title: string
   defaultOpen?: boolean
+  info?: string
   children: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -57,7 +98,19 @@ function CollapsiblePanel({
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-3 py-2 text-left transition-colors select-none bg-gray-100 dark:bg-[#2c2c2c] hover:bg-gray-200 dark:hover:bg-[#333] text-gray-500 dark:text-[#a0a0a0] hover:text-gray-700 dark:hover:text-[#d4d4d4]"
       >
-        <span className="text-[10px] font-semibold uppercase tracking-widest">{title}</span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-widest">{title}</span>
+          {info && (
+            <Tooltip text={info}>
+              <span
+                className="w-3.5 h-3.5 rounded-full border border-current flex items-center justify-center text-[8px] font-bold shrink-0 opacity-60 hover:opacity-100 transition-opacity"
+                onClick={(e) => e.stopPropagation()}
+              >
+                i
+              </span>
+            </Tooltip>
+          )}
+        </span>
         <svg
           className={`w-3 h-3 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           viewBox="0 0 12 12"
@@ -88,10 +141,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>('mm')
 
-  // Scan input mode: step size or target dot count
-  const [scanInputMode, setScanInputMode] = useState<'step' | 'count'>('step')
+  // Scan input mode: step size or target dot count or total dots
+  const [scanInputMode, setScanInputMode] = useState<'step' | 'count' | 'total'>('step')
   const [targetNx, setTargetNx] = useState(10)
   const [targetNy, setTargetNy] = useState(10)
+  const [targetTotal, setTargetTotal] = useState(25)
 
   // Keep offset and dot-count fields in sync based on stage max scan size:
   //   step = max_scan / (n - 1)  <->  n = round(max_scan / step) + 1
@@ -228,6 +282,10 @@ export default function App() {
 
   const [exclusionZones, setExclusionZones] = useState<ExclusionZone[]>([])
 
+  const [frameEnabled, setFrameEnabled] = useState(false)
+  const [frameSegments, setFrameSegments] = useState<FrameSegment[]>([])
+  const [innerOffsetUm, setInnerOffsetUm] = useState(0)
+
   const handleExclusionZoneAdd = useCallback((points: Point[]) => {
     setExclusionZones((prev) => {
       const next = [...prev, { id: `ez-${Date.now()}`, points }]
@@ -264,8 +322,12 @@ export default function App() {
     setScanInputMode(sim)
     setTargetNx(nx)
     setTargetNy(ny)
+    setTargetTotal(config.targetTotal ?? 25)
     setRotationOptimizerEnabled(rot)
     setExclusionZones(config.exclusionZones ?? [])
+    setFrameEnabled(config.frameEnabled ?? false)
+    setFrameSegments(config.frameSegments ?? [])
+    setInnerOffsetUm(config.innerOffsetUm ?? 0)
     setScanResult(null)
     setError(null)
     setHasGenerated(false)
@@ -313,6 +375,31 @@ export default function App() {
     }
   }, [rotationOptimizerEnabled, scanResult, shape, stage])
 
+  // Derive frame segments from shape
+  useEffect(() => {
+    if (!shape) { setFrameSegments([]); return }
+    const DEFAULT_W = 1000 // 1 mm default frame width
+    const makeSegments = (sides: string[]): FrameSegment[] =>
+      sides.map((side, i) => {
+        const label = `F${i + 1}`
+        const existing = frameSegments.find((s) => s.id === `f${i + 1}`)
+        return { id: `f${i + 1}`, label, widthUm: existing?.widthUm ?? DEFAULT_W, side }
+      })
+
+    if (shape.type === 'rectangle') {
+      setFrameSegments(makeSegments(['top', 'right', 'bottom', 'left']))
+    } else if (shape.type === 'circle') {
+      setFrameSegments(makeSegments(['arc']))
+    } else if (shape.type === 'freeform' && shape.freeform) {
+      setFrameSegments(makeSegments(shape.freeform.points.map((_, i) => `edge-${i}`)))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape])
+
+  const handleFrameSegmentWidthChange = useCallback((id: string, widthUm: number) => {
+    setFrameSegments((prev) => prev.map((s) => s.id === id ? { ...s, widthUm } : s))
+  }, [])
+
   const handleGenerate = () => {
     setLeftOpen(false) // close drawer on mobile when generating
     if (!shape) {
@@ -333,8 +420,19 @@ export default function App() {
           step_x: nx > 1 ? stage.max_scan_width / (nx - 1) : stage.max_scan_width,
           step_y: ny > 1 ? stage.max_scan_height / (ny - 1) : stage.max_scan_height,
         }
+      } else if (scanInputMode === 'total') {
+        const [xMin, yMin, xMax, yMax] = getBoundingBox(shape)
+        const W = Math.max(1, xMax - xMin)
+        const H = Math.max(1, yMax - yMin)
+        const Nx = Math.max(2, Math.round(Math.sqrt(targetTotal * W / H)))
+        const Ny = Math.max(2, Math.round(Math.sqrt(targetTotal * H / W)))
+        params = {
+          ...scanParams,
+          step_x: W / (Nx - 1),
+          step_y: H / (Ny - 1),
+        }
       }
-      const result = generateScanGrid(shape, params, stage, exclusionZones)
+      const result = generateScanGrid(shape, params, stage, exclusionZones, innerOffsetUm)
       setScanResult(result)
       setDrawMode('select')
       analytics.scanGenerated(result.total_points, shape.type, params.step_x)
@@ -596,14 +694,19 @@ export default function App() {
                 scanInputMode={scanInputMode}
                 targetNx={targetNx}
                 targetNy={targetNy}
+                targetTotal={targetTotal}
                 rotationOptimizerEnabled={rotationOptimizerEnabled}
                 exclusionZones={exclusionZones}
+                frameEnabled={frameEnabled}
+                frameSegments={frameSegments}
+                innerOffsetUm={innerOffsetUm}
                 onDrawModeChange={setDrawMode}
                 onShapeChange={handleShapeChange}
                 onClear={handleClear}
                 onImportConfig={handleImportConfig}
               />
             </CollapsiblePanel>
+
 
             <CollapsiblePanel title="Exclusion Zones" defaultOpen={false}>
               <ExclusionControls
@@ -613,6 +716,28 @@ export default function App() {
                 onRemove={handleExclusionZoneRemove}
                 onClearAll={() => { analytics.exclusionZonesCleared(exclusionZones.length); setExclusionZones([]); setScanResult(null) }}
               />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Outer Frame" defaultOpen={false}>
+              <FrameControls
+                enabled={frameEnabled}
+                onToggle={setFrameEnabled}
+                segments={frameSegments}
+                onSegmentWidthChange={handleFrameSegmentWidthChange}
+                displayUnit={displayUnit}
+              />
+            </CollapsiblePanel>
+
+            <CollapsiblePanel title="Inner Offset" defaultOpen={false}>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[10px] text-gray-500 dark:text-[#888] shrink-0 w-14">Offset</span>
+                  <Tooltip text="Uniform inset from all sample edges. Scan points within this margin are excluded, preventing scanning too close to the boundary.">
+                    <OffsetInput valueUm={innerOffsetUm} displayUnit={displayUnit} onChange={setInnerOffsetUm} />
+                  </Tooltip>
+                  <span className="text-[10px] text-gray-400 dark:text-[#555]">{displayUnit}</span>
+                </div>
+              </div>
             </CollapsiblePanel>
 
             <CollapsiblePanel title="Scan Parameters" defaultOpen>
@@ -626,6 +751,8 @@ export default function App() {
                 targetNy={targetNy}
                 onTargetNxChange={handleTargetNxChange}
                 onTargetNyChange={handleTargetNyChange}
+                targetTotal={targetTotal}
+                onTargetTotalChange={setTargetTotal}
               />
             </CollapsiblePanel>
 
@@ -689,6 +816,8 @@ export default function App() {
               exclusionZones={exclusionZones}
               onExclusionZoneAdd={handleExclusionZoneAdd}
               onRegisterSnapshot={handleRegisterSnapshot}
+              frameEnabled={frameEnabled}
+              frameSegments={frameSegments}
             />
 
           </main>
@@ -838,7 +967,7 @@ export default function App() {
                 <ol className="space-y-1.5 list-none">
                   {[
                     ['1', 'Draw Shape', 'Use the canvas to draw a rectangle, circle, or freeform polygon around your sample area.'],
-                    ['2', 'Set Parameters', 'Choose step size (or target dot count) and overlap in the Scan Parameters panel.'],
+                    ['2', 'Set Parameters', 'Choose step size (or target grid) and overlap in the Scan Parameters panel.'],
                     ['3', 'Set Stage', 'Enter your stage constraints: max scan width/height and time per point.'],
                     ['4', 'Generate', 'Click Generate Scan to compute the grid. Results show pass count, total points, and estimated time.'],
                   ].map(([num, title, desc]) => (

@@ -4,6 +4,7 @@ import type {
   CircleParams,
   DrawMode,
   ExclusionZone,
+  FrameSegment,
   FullConfig,
   RectParams,
   SampleShape,
@@ -27,11 +28,15 @@ interface Props {
   displayUnit: DisplayUnit
   scanParams: ScanParameters
   stage: StageConstraints
-  scanInputMode: 'step' | 'count'
+  scanInputMode: 'step' | 'count' | 'total'
   targetNx: number
   targetNy: number
+  targetTotal?: number
   rotationOptimizerEnabled: boolean
   exclusionZones?: ExclusionZone[]
+  frameEnabled?: boolean
+  frameSegments?: FrameSegment[]
+  innerOffsetUm?: number
   onDrawModeChange: (mode: DrawMode) => void
   onShapeChange: (shape: SampleShape) => void
   onClear: () => void
@@ -111,8 +116,12 @@ export default function ShapeControls({
   scanInputMode,
   targetNx,
   targetNy,
+  targetTotal,
   rotationOptimizerEnabled,
   exclusionZones,
+  frameEnabled,
+  frameSegments,
+  innerOffsetUm,
   onDrawModeChange,
   onShapeChange,
   onClear,
@@ -173,8 +182,12 @@ export default function ShapeControls({
       scanInputMode,
       targetNx,
       targetNy,
+      targetTotal: targetTotal ?? 25,
       rotationOptimizerEnabled,
       exclusionZones: exclusionZones ?? [],
+      frameEnabled: frameEnabled ?? false,
+      frameSegments: frameSegments ?? [],
+      innerOffsetUm: innerOffsetUm ?? 0,
     }
 
     const now = new Date()
@@ -234,13 +247,17 @@ export default function ShapeControls({
             time_per_point_seconds: raw.stage.time_per_point_seconds ?? 1,
             tile_overlap: raw.stage.tile_overlap ?? 0,
           } : { max_scan_width: c(50), max_scan_height: c(50), time_per_point_seconds: 1, tile_overlap: 0 },
-          scanInputMode: raw.scanInputMode === 'count' ? 'count' : 'step',
+          scanInputMode: raw.scanInputMode === 'count' ? 'count' : raw.scanInputMode === 'total' ? 'total' : 'step',
           targetNx: raw.targetNx ?? 10,
           targetNy: raw.targetNy ?? 10,
+          targetTotal: raw.targetTotal ?? 25,
           rotationOptimizerEnabled: raw.rotationOptimizerEnabled ?? false,
           exclusionZones: Array.isArray(raw.exclusionZones)
             ? raw.exclusionZones.filter((z: ExclusionZone) => z.id && Array.isArray(z.points))
             : [],
+          frameEnabled: raw.frameEnabled ?? false,
+          frameSegments: raw.frameSegments ?? [],
+          innerOffsetUm: raw.innerOffsetUm ?? 0,
         }
 
         onImportConfig(config)
@@ -358,6 +375,7 @@ export default function ShapeControls({
           ))}
         </div>
         {/* Export / Import — icon only, 2nd row */}
+        <p className={LABEL_CLS + ' mt-2 mb-0.5'}>Backup</p>
         <div className="grid grid-cols-2 gap-1 mt-1">
           <Tooltip text={shape ? 'Export shape to JSON file' : 'No shape to export'} side="top">
             <button

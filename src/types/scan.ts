@@ -112,6 +112,13 @@ export interface ExclusionZone {
   points: Point[] // closed polygon vertices in µm
 }
 
+export interface FrameSegment {
+  id: string       // "f1", "f2", ...
+  label: string    // "F1", "F2", ...
+  widthUm: number  // thickness in µm
+  side: string     // "top"|"right"|"bottom"|"left" for rect; "arc" for circle; "edge-0","edge-1",... for freeform
+}
+
 // ── Full session config (export / import) ─────────────────────────────────────
 
 export interface FullConfig {
@@ -121,11 +128,15 @@ export interface FullConfig {
   scanParams: ScanParameters
   stage: StageConstraints
   displayUnit: string
-  scanInputMode: 'step' | 'count'
+  scanInputMode: 'step' | 'count' | 'total'
   targetNx: number
   targetNy: number
+  targetTotal: number
   rotationOptimizerEnabled: boolean
   exclusionZones: ExclusionZone[]
+  frameEnabled: boolean
+  frameSegments: FrameSegment[]
+  innerOffsetUm: number
 }
 
 // ── Rotation optimizer ─────────────────────────────────────────────────────────

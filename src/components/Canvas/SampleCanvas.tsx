@@ -15,6 +15,7 @@ import type {
   DrawMode,
   DrawState,
   ExclusionZone,
+  FrameSegment,
   Point,
   RotationOptimum,
   SampleShape,
@@ -77,6 +78,8 @@ interface Props {
   exclusionZones: ExclusionZone[]
   onExclusionZoneAdd: (points: Point[]) => void
   onRegisterSnapshot: (fn: () => string | null) => void
+  frameEnabled?: boolean
+  frameSegments?: FrameSegment[]
 }
 
 // ── Grid lines helper ──────────────────────────────────────────────────────────
@@ -529,7 +532,7 @@ function ScanGridRenderer({
     }
 
     if (useDots) {
-      const r = Math.max(2.5, Math.min(5, vp.scale * 4))
+      const r = Math.max(3.5, Math.min(7, vp.scale * 6))
       for (const { pt, idx } of visiblePts) {
         elements.push(
           <Circle
@@ -537,10 +540,10 @@ function ScanGridRenderer({
             x={toX(pt.x)}
             y={toY(pt.y)}
             radius={r}
-            fill={color}
-            stroke="rgba(255,255,255,0.75)"
-            strokeWidth={2}
-            opacity={opacity * 0.8}
+            fill="#facc15"
+            stroke="#92400e"
+            strokeWidth={1.5}
+            opacity={opacity * 0.95}
             listening={false}
           />,
         )
@@ -650,6 +653,113 @@ function ExclusionZoneRenderer({ zones, vp }: { zones: ExclusionZone[]; vp: View
       })}
     </>
   )
+}
+
+// ── Frame renderer ─────────────────────────────────────────────────────────────
+
+const FRAME_COLORS = ['#f97316','#ec4899','#8b5cf6','#06b6d4','#22c55e','#eab308','#ef4444','#3b82f6']
+
+function FrameRenderer({
+  shape, segments, vp, enabled,
+}: {
+  shape: SampleShape; segments: FrameSegment[]; vp: Viewport; enabled: boolean
+}) {
+  if (!enabled || segments.length === 0) return null
+
+  const toX = (um: number) => (um - vp.left) * vp.scale
+  const toY = (um: number) => (um - vp.top) * vp.scale
+  const px = (um: number) => um * vp.scale
+
+  if (shape.type === 'rectangle' && shape.rect) {
+    const r = shape.rect
+    const x0 = toX(r.x), y0 = toY(r.y)
+    const W = px(r.width), H = px(r.height)
+    return (
+      <Group listening={false}>
+        {segments.map((seg, i) => {
+          const color = FRAME_COLORS[i % FRAME_COLORS.length]
+          const w = px(seg.widthUm)
+          if (w < 0.5) return null
+          let rx = x0, ry = y0, rw = W, rh = H
+          if (seg.side === 'top')         { ry = y0 - w; rh = w }
+          else if (seg.side === 'right')  { rx = x0 + W; rw = w }
+          else if (seg.side === 'bottom') { ry = y0 + H; rh = w }
+          else if (seg.side === 'left')   { rx = x0 - w; rw = w }
+          const midX = rx + rw / 2, midY = ry + rh / 2
+          return (
+            <React.Fragment key={seg.id}>
+              <Rect x={rx} y={ry} width={rw} height={rh} fill={color} opacity={0.25} listening={false} />
+              <Rect x={rx} y={ry} width={rw} height={rh} stroke={color} strokeWidth={1} opacity={0.7} listening={false} />
+              <Text x={midX - 8} y={midY - 6} text={seg.label} fontSize={10} fontStyle="bold" fill={color} listening={false} />
+            </React.Fragment>
+          )
+        })}
+      </Group>
+    )
+  }
+
+  if (shape.type === 'circle' && shape.circle) {
+    const c = shape.circle
+    const cx = toX(c.cx), cy = toY(c.cy)
+    const rInner = px(c.radius)
+    return (
+      <Group listening={false}>
+        {segments.map((seg, i) => {
+          const color = FRAME_COLORS[i % FRAME_COLORS.length]
+          const w = px(seg.widthUm)
+          if (w < 0.5) return null
+          return (
+            <React.Fragment key={seg.id}>
+              <Arc x={cx} y={cy} innerRadius={rInner} outerRadius={rInner + w} angle={360} fill={color} opacity={0.25} listening={false} />
+              <Arc x={cx} y={cy} innerRadius={rInner} outerRadius={rInner + w} angle={360} stroke={color} strokeWidth={1} opacity={0.7} listening={false} />
+              <Text x={cx - 8} y={cy - rInner - w - 14} text={seg.label} fontSize={10} fontStyle="bold" fill={color} listening={false} />
+            </React.Fragment>
+          )
+        })}
+      </Group>
+    )
+  }
+
+  if (shape.type === 'freeform' && shape.freeform) {
+    const pts = shape.freeform.points
+    const n = pts.length
+    return (
+      <Group listening={false}>
+        {segments.map((seg, i) => {
+          const color = FRAME_COLORS[i % FRAME_COLORS.length]
+          const w = px(seg.widthUm)
+          if (w < 0.5) return null
+          const p0 = pts[i], p1 = pts[(i + 1) % n]
+          const x0 = toX(p0.x), y0 = toY(p0.y)
+          const x1 = toX(p1.x), y1 = toY(p1.y)
+          const dx = x1 - x0, dy = y1 - y0
+          const len = Math.sqrt(dx * dx + dy * dy)
+          if (len < 1) return null
+          const nx = -dy / len, ny = dx / len
+          const ox = nx * w, oy = ny * w
+          const midX = (x0 + x1) / 2 + ox * 0.5 + nx * 8
+          const midY = (y0 + y1) / 2 + oy * 0.5 + ny * 8
+          return (
+            <React.Fragment key={seg.id}>
+              <Line
+                points={[x0 + ox, y0 + oy, x1 + ox, y1 + oy]}
+                stroke={color} strokeWidth={w} opacity={0.25}
+                lineCap="butt" listening={false}
+              />
+              <Line
+                points={[x0 + ox, y0 + oy, x1 + ox, y1 + oy]}
+                stroke={color} strokeWidth={1} opacity={0.8}
+                lineCap="butt" listening={false}
+              />
+              <Text x={midX - 8} y={midY - 6} text={seg.label} fontSize={10} fontStyle="bold" fill={color} listening={false} />
+            </React.Fragment>
+          )
+        })}
+      </Group>
+    )
+  }
+
+  return null
 }
 
 // ── Drawing preview ────────────────────────────────────────────────────────────
@@ -870,6 +980,8 @@ export default function SampleCanvas({
   exclusionZones,
   onExclusionZoneAdd,
   onRegisterSnapshot,
+  frameEnabled,
+  frameSegments,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -1611,6 +1723,16 @@ export default function SampleCanvas({
 
           {/* Exclusion zones */}
           <ExclusionZoneRenderer zones={exclusionZones} vp={vp} />
+
+          {/* Frame overlay */}
+          {shape && frameEnabled && frameSegments && (
+            <FrameRenderer
+              shape={shape}
+              segments={frameSegments}
+              vp={vp}
+              enabled={frameEnabled}
+            />
+          )}
 
           {/* Scan grid — hidden while drawing exclusion zones */}
           {drawMode !== 'exclusion' && (() => {
