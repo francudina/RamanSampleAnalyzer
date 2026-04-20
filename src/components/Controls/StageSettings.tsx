@@ -119,6 +119,30 @@ export default function StageSettings({ constraints, displayUnit, onChange }: Pr
         </div>
       </Tooltip>
 
+      {/* Tile overlap */}
+      <Tooltip text="Overlap between adjacent scan tiles when the sample is larger than the stage scan window" side="right">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <span className={LABEL_CLS}>Tile Overlap</span>
+            <span className="text-[10px] font-mono text-gray-500 dark:text-[#888]">
+              {Math.round((constraints.tile_overlap ?? 0) * 100)} %
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={40}
+            step={5}
+            value={Math.round((constraints.tile_overlap ?? 0) * 100)}
+            onChange={(e) => set({ tile_overlap: parseInt(e.target.value) / 100 })}
+            className="w-full h-1.5 rounded accent-[#4a9eff] cursor-pointer"
+          />
+          <div className="flex justify-between text-[9px] text-gray-300 dark:text-[#555]">
+            <span>0%</span><span>20%</span><span>40%</span>
+          </div>
+        </div>
+      </Tooltip>
+
       {/* Stage presets */}
       <div className="flex flex-col gap-0.5">
         <span className={LABEL_CLS}>Stage Presets</span>

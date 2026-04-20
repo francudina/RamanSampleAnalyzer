@@ -43,6 +43,7 @@ export interface StageConstraints {
   max_scan_width: number         // µm
   max_scan_height: number        // µm
   time_per_point_seconds: number
+  tile_overlap: number           // 0.0–0.5, overlap fraction between adjacent tiles
 }
 
 export interface ScanRequest {
@@ -104,3 +105,11 @@ export type DrawState =
   | { mode: 'drawing_rect'; startX: number; startY: number }
   | { mode: 'drawing_circle'; cx: number; cy: number }
   | { mode: 'drawing_freeform'; points: Point[]; preview: Point | null; anchorIndex?: number }
+
+// ── Rotation optimizer ─────────────────────────────────────────────────────────
+
+export interface RotationOptimum {
+  angle_deg: number
+  tile_count: number
+  baseline_tile_count: number  // tile count at 0°
+}

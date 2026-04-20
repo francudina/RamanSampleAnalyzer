@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Circle,
+  Group,
   Layer,
   Line,
   Rect,
@@ -13,6 +14,7 @@ import type {
   DrawMode,
   DrawState,
   Point,
+  RotationOptimum,
   SampleShape,
   ScanResult,
   Viewport,
@@ -29,6 +31,7 @@ import { type DisplayUnit, fmtAreaDisplay, fmtDisplay, umToDisplay } from '../..
 
 // Pass colours for multi-pass scans
 const PASS_COLORS = ['#3b82f6', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#06b6d4']
+
 
 // ── Polygon area (shoelace, µm²) ──────────────────────────────────────────────
 
@@ -66,6 +69,9 @@ interface Props {
   hoveredPass: number | null
   onPassHover: (pass: number | null) => void
   onShapeChange: (shape: SampleShape) => void
+  rotationOptimum: RotationOptimum | null
+  rotationTab?: 'current' | 'rotated'
+  rotatedScanResult?: ScanResult | null
 }
 
 // ── Grid lines helper ──────────────────────────────────────────────────────────
@@ -208,42 +214,47 @@ function ShapeRenderer({
           strokeWidth={1.5}
           listening={false}
         />
-        {/* Segment labels */}
-        {pts.map((p, i) => {
-          const next = pts[(i + 1) % pts.length]
-          const x1 = toX(p.x), y1 = toY(p.y)
-          const x2 = toX(next.x), y2 = toY(next.y)
-          const mx = (x1 + x2) / 2
-          const my = (y1 + y2) / 2
-          const edgeDx = x2 - x1, edgeDy = y2 - y1
-          const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
-          const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
-          const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
-          let perpX = -ny, perpY = nx
-          if (perpY > 0 || (perpY === 0 && perpX < 0)) { perpX = -perpX; perpY = -perpY }
-          let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
-          if (angle > 90) angle -= 180
-          else if (angle <= -90) angle += 180
-          const nextIdx = (i + 1) % pts.length
-          const label = `P${i + 1} – P${nextIdx + 1}`
-          const OFFSET = 12
-          const estW = label.length * 5.2
-          return (
-            <Text
-              key={`seg-lbl-${i}`}
-              x={mx + perpX * OFFSET}
-              y={my + perpY * OFFSET}
-              text={label}
-              fontSize={9}
-              fill="#2563eb"
-              opacity={0.7}
-              rotation={angle}
-              offsetX={estW / 2}
-              offsetY={4.5}
-              listening={false}
-            />
-          )
-        })}
+        {/* Segment labels — pushed to outside of shape */}
+        {(() => {
+          const centX = pts.reduce((s, p) => s + toX(p.x), 0) / pts.length
+          const centY = pts.reduce((s, p) => s + toY(p.y), 0) / pts.length
+          return pts.map((p, i) => {
+            const next = pts[(i + 1) % pts.length]
+            const x1 = toX(p.x), y1 = toY(p.y)
+            const x2 = toX(next.x), y2 = toY(next.y)
+            const mx = (x1 + x2) / 2
+            const my = (y1 + y2) / 2
+            const edgeDx = x2 - x1, edgeDy = y2 - y1
+            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
+            const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
+            const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
+            let perpX = -ny, perpY = nx
+            // Flip if pointing toward centroid (we want outward)
+            if (perpX * (mx - centX) + perpY * (my - centY) < 0) { perpX = -perpX; perpY = -perpY }
+            let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
+            if (angle > 90) angle -= 180
+            else if (angle <= -90) angle += 180
+            const nextIdx = (i + 1) % pts.length
+            const label = `P${i + 1} – P${nextIdx + 1}`
+            const OFFSET = 14
+            const estW = label.length * 5.2
+            return (
+              <Text
+                key={`seg-lbl-${i}`}
+                x={mx + perpX * OFFSET}
+                y={my + perpY * OFFSET}
+                text={label}
+                fontSize={9}
+                fill="#2563eb"
+                opacity={0.7}
+                rotation={angle}
+                offsetX={estW / 2}
+                offsetY={4.5}
+                listening={false}
+              />
+            )
+          })
+        })()}
         {/* Vertex dots + labels */}
         {pts.map((p, i) => (
           <React.Fragment key={`vtx-${i}`}>
@@ -300,49 +311,49 @@ function ShapeRenderer({
           strokeWidth={1.5}
           listening={false}
         />
-        {/* Segment labels — parallel to each edge */}
-        {pts.map((p, i) => {
-          const next = pts[(i + 1) % pts.length]
-          const x1 = toX(p.x), y1 = toY(p.y)
-          const x2 = toX(next.x), y2 = toY(next.y)
-          const mx = (x1 + x2) / 2
-          const my = (y1 + y2) / 2
-          const edgeDx = x2 - x1
-          const edgeDy = y2 - y1
-          const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
-          // Normalised direction
-          const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
-          const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
-          // Perpendicular: choose whichever half-space points screen-upward
-          let perpX = -ny
-          let perpY = nx
-          if (perpY > 0 || (perpY === 0 && perpX < 0)) { perpX = -perpX; perpY = -perpY }
-          // Text rotation — normalised to (-90°, 90°] so text is never upside-down
-          let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
-          if (angle > 90) angle -= 180
-          else if (angle <= -90) angle += 180
-
-          const nextIdx = (i + 1) % pts.length
-          const label = `P${i + 1} – P${nextIdx + 1}`
-          const OFFSET = 12
-          const estW = label.length * 5.2
-
-          return (
-            <Text
-              key={`seg-lbl-${i}`}
-              x={mx + perpX * OFFSET}
-              y={my + perpY * OFFSET}
-              text={label}
-              fontSize={9}
-              fill="#2563eb"
-              opacity={0.7}
-              rotation={angle}
-              offsetX={estW / 2}
-              offsetY={4.5}
-              listening={false}
-            />
-          )
-        })}
+        {/* Segment labels — pushed to outside of polygon */}
+        {(() => {
+          const centX = pts.reduce((s, p) => s + toX(p.x), 0) / pts.length
+          const centY = pts.reduce((s, p) => s + toY(p.y), 0) / pts.length
+          return pts.map((p, i) => {
+            const next = pts[(i + 1) % pts.length]
+            const x1 = toX(p.x), y1 = toY(p.y)
+            const x2 = toX(next.x), y2 = toY(next.y)
+            const mx = (x1 + x2) / 2
+            const my = (y1 + y2) / 2
+            const edgeDx = x2 - x1
+            const edgeDy = y2 - y1
+            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
+            const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
+            const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
+            let perpX = -ny
+            let perpY = nx
+            // Flip if pointing toward centroid (we want outward)
+            if (perpX * (mx - centX) + perpY * (my - centY) < 0) { perpX = -perpX; perpY = -perpY }
+            let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
+            if (angle > 90) angle -= 180
+            else if (angle <= -90) angle += 180
+            const nextIdx = (i + 1) % pts.length
+            const label = `P${i + 1} – P${nextIdx + 1}`
+            const OFFSET = 14
+            const estW = label.length * 5.2
+            return (
+              <Text
+                key={`seg-lbl-${i}`}
+                x={mx + perpX * OFFSET}
+                y={my + perpY * OFFSET}
+                text={label}
+                fontSize={9}
+                fill="#2563eb"
+                opacity={0.7}
+                rotation={angle}
+                offsetX={estW / 2}
+                offsetY={4.5}
+                listening={false}
+              />
+            )
+          })
+        })()}
         {/* Vertex dots + labels */}
         {pts.map((p, i) => (
           <React.Fragment key={`vtx-${i}`}>
@@ -371,6 +382,28 @@ function ShapeRenderer({
   }
 
   return null
+}
+
+// ── Shape centroid helper ──────────────────────────────────────────────────────
+
+function getShapeCentroidUm(shape: SampleShape): { x: number; y: number } {
+  if (shape.type === 'circle' && shape.circle) {
+    return { x: shape.circle.cx, y: shape.circle.cy }
+  }
+  if (shape.type === 'rectangle' && shape.rect) {
+    const r = shape.rect
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  }
+  if (shape.type === 'freeform' && shape.freeform) {
+    const pts = shape.freeform.points
+    if (pts.length > 0) {
+      return {
+        x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
+        y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
+      }
+    }
+  }
+  return { x: 0, y: 0 }
 }
 
 // ── Scan grid renderer ─────────────────────────────────────────────────────────
@@ -455,7 +488,7 @@ function ScanGridRenderer({
         key={`label-${passIdx}`}
         x={toX(pass.region.x_min) + 4}
         y={toY(pass.region.y_min) + 4}
-        text={`Pass ${passIdx + 1}`}
+        text={`Tile ${passIdx + 1}`}
         fontSize={isHovered ? 13 : 11}
         fill={color}
         fontStyle="bold"
@@ -635,43 +668,48 @@ function DrawingPreview({
           />
         )}
 
-        {/* Segment labels — same as ShapeRenderer */}
-        {pts.map((p, i) => {
-          const next = pts[(i + 1) % pts.length]
-          if (i === pts.length - 1 && pts.length < 3) return null
-          const x1 = toX(p.x), y1 = toY(p.y)
-          const x2 = toX(next.x), y2 = toY(next.y)
-          const mx = (x1 + x2) / 2
-          const my = (y1 + y2) / 2
-          const edgeDx = x2 - x1, edgeDy = y2 - y1
-          const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
-          const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
-          const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
-          let perpX = -ny, perpY = nx
-          if (perpY > 0 || (perpY === 0 && perpX < 0)) { perpX = -perpX; perpY = -perpY }
-          let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
-          if (angle > 90) angle -= 180
-          else if (angle <= -90) angle += 180
-          const nextIdx = (i + 1) % pts.length
-          const label = `P${i + 1} – P${nextIdx + 1}`
-          const OFFSET = 12
-          const estW = label.length * 5.2
-          return (
-            <Text
-              key={`seg-lbl-${i}`}
-              x={mx + perpX * OFFSET}
-              y={my + perpY * OFFSET}
-              text={label}
-              fontSize={9}
-              fill="#2563eb"
-              opacity={0.7}
-              rotation={angle}
-              offsetX={estW / 2}
-              offsetY={4.5}
-              listening={false}
-            />
-          )
-        })}
+        {/* Segment labels — pushed to outside of polygon */}
+        {(() => {
+          const centX = pts.reduce((s, p) => s + toX(p.x), 0) / pts.length
+          const centY = pts.reduce((s, p) => s + toY(p.y), 0) / pts.length
+          return pts.map((p, i) => {
+            const next = pts[(i + 1) % pts.length]
+            if (i === pts.length - 1 && pts.length < 3) return null
+            const x1 = toX(p.x), y1 = toY(p.y)
+            const x2 = toX(next.x), y2 = toY(next.y)
+            const mx = (x1 + x2) / 2
+            const my = (y1 + y2) / 2
+            const edgeDx = x2 - x1, edgeDy = y2 - y1
+            const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
+            const nx = edgeLen > 0 ? edgeDx / edgeLen : 1
+            const ny = edgeLen > 0 ? edgeDy / edgeLen : 0
+            let perpX = -ny, perpY = nx
+            // Flip if pointing toward centroid (we want outward)
+            if (perpX * (mx - centX) + perpY * (my - centY) < 0) { perpX = -perpX; perpY = -perpY }
+            let angle = Math.atan2(edgeDy, edgeDx) * 180 / Math.PI
+            if (angle > 90) angle -= 180
+            else if (angle <= -90) angle += 180
+            const nextIdx = (i + 1) % pts.length
+            const label = `P${i + 1} – P${nextIdx + 1}`
+            const OFFSET = 14
+            const estW = label.length * 5.2
+            return (
+              <Text
+                key={`seg-lbl-${i}`}
+                x={mx + perpX * OFFSET}
+                y={my + perpY * OFFSET}
+                text={label}
+                fontSize={9}
+                fill="#2563eb"
+                opacity={0.7}
+                rotation={angle}
+                offsetX={estW / 2}
+                offsetY={4.5}
+                listening={false}
+              />
+            )
+          })
+        })()}
 
         {/* Vertex dots + P labels — same as ShapeRenderer */}
         {pts.map((p, i) => {
@@ -740,6 +778,9 @@ export default function SampleCanvas({
   hoveredPass,
   onPassHover,
   onShapeChange,
+  rotationOptimum,
+  rotationTab,
+  rotatedScanResult,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -1005,12 +1046,16 @@ export default function SampleCanvas({
       // ── Scan dot proximity tooltip ─────────────────────────────────────────
       // Only active when dots are rendered (same conditions as ScanGridRenderer):
       // focused pass is hovered, spacing is large enough, and we're not mid-draw.
+      const activeResult = (rotationTab === 'rotated' && rotatedScanResult != null &&
+        rotationOptimum != null && rotationOptimum.tile_count < rotationOptimum.baseline_tile_count)
+        ? rotatedScanResult
+        : scanResult
       if (
-        scanResult &&
+        activeResult &&
         hoveredPass !== null &&
         drawState.mode === 'idle'
       ) {
-        const pass = scanResult.passes.find((p) => p.pass_number === hoveredPass)
+        const pass = activeResult.passes.find((p) => p.pass_number === hoveredPass)
         if (pass) {
           const dotSpacePx = Math.min(pass.delta_x, pass.delta_y) * vp.scale
           if (dotSpacePx >= DOT_SPACING_THRESHOLD) {
@@ -1359,16 +1404,24 @@ export default function SampleCanvas({
             stroke={darkMode ? '#444' : '#d1d5db'}
             strokeWidth={1.5}
           />
-          {/* Axis labels */}
+          {/* Axis labels + direction arrows */}
+          {/* Y label next to arrow at bottom (Y increases downward) */}
+          <Line
+            points={[toX(0) - 5, size.h - 10, toX(0), size.h - 2, toX(0) + 5, size.h - 10]}
+            stroke={darkMode ? '#555' : '#9ca3af'}
+            strokeWidth={1.5}
+            listening={false}
+          />
           <Text
-            x={toX(0) - 18}
-            y={4}
+            x={toX(0) - 22}
+            y={size.h - 18}
             text="Y"
             fontSize={14}
             fontStyle="bold"
             fill={darkMode ? '#555' : '#9ca3af'}
             listening={false}
           />
+          {/* X label at right, arrow pointing rightward (X increases rightward) */}
           <Text
             x={size.w - 20}
             y={toY(0) - 18}
@@ -1376,6 +1429,12 @@ export default function SampleCanvas({
             fontSize={14}
             fontStyle="bold"
             fill={darkMode ? '#555' : '#9ca3af'}
+            listening={false}
+          />
+          <Line
+            points={[size.w - 10, toY(0) - 5, size.w - 2, toY(0), size.w - 10, toY(0) + 5]}
+            stroke={darkMode ? '#555' : '#9ca3af'}
+            strokeWidth={1.5}
             listening={false}
           />
           {/* Origin dot */}
@@ -1388,17 +1447,49 @@ export default function SampleCanvas({
           {shape && drawState.mode !== 'drawing_freeform' && <ShapeRenderer shape={shape} vp={vp} />}
 
           {/* Scan grid */}
-          {scanResult && (
-            <ScanGridRenderer
-              scanResult={scanResult}
-              vp={vp}
-              width={size.w}
-              height={size.h}
-              focusMode={focusMode}
-              hoveredPass={hoveredPass}
-              onPassHover={onPassHover}
-            />
-          )}
+          {(() => {
+            const showRotated = rotationTab === 'rotated' &&
+              rotatedScanResult != null &&
+              rotationOptimum != null &&
+              rotationOptimum.tile_count < rotationOptimum.baseline_tile_count
+
+            if (showRotated && shape) {
+              const { x: cx_um, y: cy_um } = getShapeCentroidUm(shape)
+              const cx_px = umToPixel(cx_um, vp.left, vp.scale)
+              const cy_px = umToPixel(cy_um, vp.top, vp.scale)
+              return (
+                <Group
+                  x={cx_px}
+                  y={cy_px}
+                  offsetX={cx_px}
+                  offsetY={cy_px}
+                  rotation={-rotationOptimum!.angle_deg}
+                >
+                  <ScanGridRenderer
+                    scanResult={rotatedScanResult!}
+                    vp={vp}
+                    width={size.w}
+                    height={size.h}
+                    focusMode={focusMode}
+                    hoveredPass={hoveredPass}
+                    onPassHover={onPassHover}
+                  />
+                </Group>
+              )
+            }
+
+            return scanResult && (
+              <ScanGridRenderer
+                scanResult={scanResult}
+                vp={vp}
+                width={size.w}
+                height={size.h}
+                focusMode={focusMode}
+                hoveredPass={hoveredPass}
+                onPassHover={onPassHover}
+              />
+            )
+          })()}
 
           {/* Drawing previews */}
           {previewRect && (

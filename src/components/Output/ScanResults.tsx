@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ScanPass, ScanResult } from '../../types/scan'
+import type { RotationOptimum, ScanPass, ScanResult } from '../../types/scan'
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
@@ -8,6 +8,7 @@ import {
   fmtDisplay,
   fmtMm2,
   fmtTime,
+  umToDisplay,
 } from '../../utils/units'
 import { analytics } from '../../utils/analytics'
 
@@ -19,13 +20,24 @@ interface Props {
   focusMode: boolean
   hoveredPass: number | null
   onPassHover: (pass: number | null) => void
+  rotationOptimizerEnabled: boolean
+  onRotationOptimizerToggle: (v: boolean) => void
+  rotationOptimum: RotationOptimum | null
+  rotatedScanResult?: ScanResult | null
+  activeTab?: 'current' | 'rotated'
+  onActiveTabChange?: (tab: 'current' | 'rotated') => void
 }
 
 const PASS_COLORS = ['#4a9eff', '#f97316', '#22c55e', '#a855f7', '#ef4444', '#06b6d4']
 
 function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
-  const d = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!.decimals
-  const fmt = (um: number) => fmtDisplay(um, displayUnit, d)
+  // Full precision: convert to display unit and strip trailing zeros
+  const fmtFull = (um: number): string => {
+    const val = umToDisplay(um, displayUnit)
+    // Use enough decimal places then strip trailing zeros
+    const s = val.toFixed(10).replace(/\.?0+$/, '')
+    return `${s} ${displayUnit}`
+  }
   const lines: string[] = [
     '=== Raman Scan Configuration ===',
     `Unit: ${displayUnit}`,
@@ -33,10 +45,11 @@ function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
   ]
 
   result.passes.forEach((pass) => {
-    lines.push(`Pass ${pass.pass_number}:`)
-    lines.push(`  Start (X, Y):  ${fmt(pass.start_point.x)}  ,  ${fmt(pass.start_point.y)}`)
-    lines.push(`  Step X:  ${fmt(pass.delta_x)}`)
-    lines.push(`  Step Y:  ${fmt(pass.delta_y)}`)
+    lines.push(`Tile ${pass.pass_number}:`)
+    lines.push(`  Stage position:  X = ${fmtFull(pass.start_point.x)},  Y = ${fmtFull(pass.start_point.y)}`)
+    lines.push(`  Start (X, Y):  ${fmtFull(pass.start_point.x)}  ,  ${fmtFull(pass.start_point.y)}`)
+    lines.push(`  Step X:  ${fmtFull(pass.delta_x)}`)
+    lines.push(`  Step Y:  ${fmtFull(pass.delta_y)}`)
     lines.push(`  Dots X:  ${fmtCount(pass.nx)}`)
     lines.push(`  Dots Y:  ${fmtCount(pass.ny)}`)
     lines.push(`  Points:  ${fmtCount(pass.total_points)}  (${pass.nx} cols x ${pass.ny} rows)`)
@@ -58,12 +71,32 @@ function buildCopyText(result: ScanResult, displayUnit: DisplayUnit): string {
   return lines.join('\n')
 }
 
-export default function ScanResults({ result, displayUnit, isLoading, error, focusMode, hoveredPass, onPassHover }: Props) {
+export default function ScanResults({
+  result,
+  displayUnit,
+  isLoading,
+  error,
+  focusMode,
+  hoveredPass,
+  onPassHover,
+  rotationOptimizerEnabled,
+  onRotationOptimizerToggle,
+  rotationOptimum,
+  rotatedScanResult,
+  activeTab: activeTabProp,
+  onActiveTabChange,
+}: Props) {
   const [copied, setCopied] = useState(false)
   const [detailPass, setDetailPass] = useState<ScanPass | null>(null)
   const [loadingPass, setLoadingPass] = useState<number | null>(null)
+  const [activeTabLocal, setActiveTabLocal] = useState<'current' | 'rotated'>('current')
   const passRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
+  const activeTab = activeTabProp ?? activeTabLocal
+  const setActiveTab = (tab: 'current' | 'rotated') => {
+    setActiveTabLocal(tab)
+    onActiveTabChange?.(tab)
+  }
   useEffect(() => {
     if (hoveredPass === null) return
     const el = passRefs.current[hoveredPass]
@@ -72,7 +105,10 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
 
   const handleCopy = async () => {
     if (!result) return
-    await navigator.clipboard.writeText(buildCopyText(result, displayUnit))
+    const isRotated = activeTab === 'rotated' && rotatedScanResult &&
+      rotatedScanResult.passes.length < result.passes.length
+    const toCopy = isRotated ? rotatedScanResult! : result
+    await navigator.clipboard.writeText(buildCopyText(toCopy, displayUnit))
     setCopied(true)
     analytics.scanCopied()
     setTimeout(() => setCopied(false), 2000)
@@ -104,6 +140,8 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
       </div>
     )
   }
+
+  const multiTile = result.passes.length > 1
 
   return (
     <div className="space-y-2.5">
@@ -145,15 +183,87 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
             <span className="font-mono text-gray-800 dark:text-[#d4d4d4]">{val}</span>
           </div>
         ))}
-        {result.requires_multiple_passes && (
+        {multiTile && (
           <div className="pt-1 border-t border-gray-200 dark:border-[#333] text-[10px] text-amber-600 dark:text-amber-400">
-            {result.passes.length} passes, reposition stage between each pass.
+            {result.passes.length} tiles, reposition stage between each tile.
           </div>
         )}
       </div>
 
-      {/* Per-pass blocks */}
-      {result.passes.map((pass, idx) => {
+      {/* Rotation optimizer — only shown when multi-tile */}
+      {multiTile && (
+        <div className="rounded border border-gray-200 dark:border-[#333] bg-white dark:bg-[#252525] overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2">
+            <div>
+              <span className="text-xs font-medium text-gray-700 dark:text-[#d4d4d4]">Rotation optimizer</span>
+              <p className="text-[9px] text-gray-400 dark:text-[#666] mt-0.5">
+                Find the angle that minimises tile count
+              </p>
+            </div>
+            <button
+              onClick={() => onRotationOptimizerToggle(!rotationOptimizerEnabled)}
+              className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 shrink-0 ${
+                rotationOptimizerEnabled ? 'bg-blue-500' : 'bg-gray-300 dark:bg-[#444]'
+              }`}
+            >
+              <span
+                className={`w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  rotationOptimizerEnabled ? 'translate-x-4' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {rotationOptimizerEnabled && rotationOptimum && (
+            rotatedScanResult && rotatedScanResult.passes.length < result.passes.length ? (
+              <div className="mx-3 mb-2 rounded border border-amber-400 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 space-y-1">
+                <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">Rotation suggested</p>
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                  Rotating sample by <strong>{rotationOptimum.angle_deg}°</strong> reduces tiles from{' '}
+                  <strong>{result.passes.length}</strong> to{' '}
+                  <strong>{rotatedScanResult.passes.length}</strong>.
+                </p>
+                <p className="text-[9px] text-amber-600 dark:text-amber-500">
+                  Rotate around the sample centre before placing on the stage.
+                </p>
+              </div>
+            ) : (
+              <p className="px-3 pb-2 text-[9px] text-gray-400 dark:text-[#666]">
+                No rotation benefit, current orientation is already optimal ({result.passes.length} tile{result.passes.length !== 1 ? 's' : ''}).
+              </p>
+            )
+          )}
+        </div>
+      )}
+
+      {/* Tabs — shown when rotation optimizer finds actual benefit */}
+      {multiTile && rotationOptimizerEnabled && rotationOptimum &&
+        rotatedScanResult && rotatedScanResult.passes.length < result.passes.length && (
+        <div className="flex rounded overflow-hidden border border-gray-200 dark:border-[#333]">
+          {(['current', 'rotated'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-1.5 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                activeTab === tab
+                  ? 'bg-white dark:bg-[#252525] text-gray-800 dark:text-[#d4d4d4]'
+                  : 'bg-gray-100 dark:bg-[#2a2a2a] text-gray-400 dark:text-[#666] hover:text-gray-600 dark:hover:text-[#aaa]'
+              }`}
+            >
+              {tab === 'current'
+                ? `Current (${result.passes.length} tile${result.passes.length !== 1 ? 's' : ''})`
+                : `Rotated ${rotationOptimum.angle_deg}° (${rotatedScanResult.passes.length} tile${rotatedScanResult.passes.length !== 1 ? 's' : ''})`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Per-tile blocks */}
+      {(activeTab === 'rotated' && rotatedScanResult && rotationOptimizerEnabled &&
+        rotatedScanResult.passes.length < result.passes.length
+          ? rotatedScanResult
+          : result
+      ).passes.map((pass, idx) => {
         const color = PASS_COLORS[idx % PASS_COLORS.length]
         const d = DISPLAY_UNIT_OPTIONS.find((o) => o.value === displayUnit)!.decimals
         const fmt = (um: number) => fmtDisplay(um, displayUnit, d)
@@ -171,11 +281,12 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
             onMouseEnter={() => focusMode && onPassHover(pass.pass_number)}
             onMouseLeave={() => focusMode && onPassHover(null)}
           >
+            {/* Tile header */}
             <div
               className="px-3 py-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide"
               style={{ background: color + '18', color }}
             >
-              <span>Pass {pass.pass_number}</span>
+              <span>Tile {pass.pass_number}</span>
               <div className="flex items-center gap-2">
                 <span className="font-mono">{fmtCount(pass.total_points)} pts</span>
                 <button
@@ -197,8 +308,25 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
                 </button>
               </div>
             </div>
+
+            {/* Stage position row */}
+            <div
+              className="px-3 pt-2 pb-1.5 flex items-center gap-3 text-xs border-b"
+              style={{ borderColor: color + '22', background: color + '08' }}
+            >
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-400 dark:text-[#666] shrink-0 w-16">
+                Move stage
+              </span>
+              <span className="font-mono font-semibold" style={{ color }}>
+                X = {fmt(pass.start_point.x)}
+              </span>
+              <span className="font-mono font-semibold" style={{ color }}>
+                Y = {fmt(pass.start_point.y)}
+              </span>
+            </div>
+
+            {/* Scan detail table */}
             <div className="px-3 py-2 bg-white dark:bg-[#252525]">
-              {/* Table: rows = Start/Step/Dots, cols = X/Y */}
               <table className="w-full text-xs">
                 <thead>
                   <tr>
@@ -230,7 +358,7 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
         )
       })}
 
-      {/* Pass dots detail modal */}
+      {/* Tile dots detail modal */}
       {detailPass && (() => {
         const idx = result!.passes.indexOf(detailPass)
         const color = PASS_COLORS[idx % PASS_COLORS.length]
@@ -245,13 +373,12 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
               className="relative bg-white dark:bg-[#1e1e1e] rounded-lg shadow-2xl border border-gray-200 dark:border-[#333] w-[calc(100vw-2rem)] max-w-[420px] max-h-[80vh] flex flex-col"
               onClick={e => e.stopPropagation()}
             >
-              {/* Header */}
               <div
                 className="px-4 py-3 flex items-center justify-between rounded-t-lg border-b border-gray-200 dark:border-[#333]"
                 style={{ background: color + '18' }}
               >
                 <div>
-                  <span className="text-sm font-bold" style={{ color }}>Pass {detailPass.pass_number}</span>
+                  <span className="text-sm font-bold" style={{ color }}>Tile {detailPass.pass_number}</span>
                   <span className="ml-2 text-xs text-gray-400 dark:text-[#888]">
                     {fmtCount(detailPass.total_points)} points
                   </span>
@@ -263,13 +390,11 @@ export default function ScanResults({ result, displayUnit, isLoading, error, foc
                   ×
                 </button>
               </div>
-              {/* Column headers */}
               <div className="px-4 py-1.5 grid grid-cols-3 gap-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-[#666] border-b border-gray-100 dark:border-[#2a2a2a]">
                 <span>#</span>
                 <span>X</span>
                 <span>Y</span>
               </div>
-              {/* Dots list */}
               <div className="overflow-y-auto flex-1 px-4 py-1 divide-y divide-gray-100 dark:divide-[#2a2a2a]">
                 {detailPass.grid_points.map((pt, i) => (
                   <div key={i} className="grid grid-cols-3 gap-2 py-1 text-xs font-mono text-gray-700 dark:text-[#ccc]">

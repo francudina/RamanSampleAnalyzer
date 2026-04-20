@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateScanGrid } from './utils/scanGenerator'
+import { findOptimalRotation, getRotatedBoundingRectShape } from './utils/tilingPlanner'
 import SampleCanvas from './components/Canvas/SampleCanvas'
 import ShapeControls from './components/Controls/ShapeControls'
 import ScanParamsForm from './components/Controls/ScanParamsForm'
@@ -11,11 +12,11 @@ import type {
   ScanParameters,
   ScanResult,
   StageConstraints,
+  RotationOptimum,
 } from './types/scan'
 import {
   type DisplayUnit,
   DISPLAY_UNIT_OPTIONS,
-  fmtDisplay,
   mmToUm,
 } from './utils/units'
 import { analytics } from './utils/analytics'
@@ -30,6 +31,7 @@ const DEFAULT_STAGE: StageConstraints = {
   max_scan_width: mmToUm(50),
   max_scan_height: mmToUm(50),
   time_per_point_seconds: 1,
+  tile_overlap: 0,
 }
 
 // ── Collapsible panel ─────────────────────────────────────────────────────────
@@ -113,6 +115,12 @@ export default function App() {
   const [hasGenerated, setHasGenerated] = useState(false)
   const [focusMode, setFocusMode] = useState(true)
   const [hoveredPass, setHoveredPass] = useState<number | null>(null)
+
+  // Rotation optimizer
+  const [rotationOptimizerEnabled, setRotationOptimizerEnabled] = useState(false)
+  const [rotationOptimum, setRotationOptimum] = useState<RotationOptimum | null>(null)
+  const [rotatedScanResult, setRotatedScanResult] = useState<ScanResult | null>(null)
+  const [rotationTab, setRotationTab] = useState<'current' | 'rotated'>('current')
 
   const [darkMode, setDarkMode] = useState<boolean>(
     () => document.documentElement.classList.contains('dark')
@@ -214,6 +222,35 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [handleUndo])
 
+  // Compute rotation optimum when optimizer is toggled or scan result changes
+  useEffect(() => {
+    if (rotationOptimizerEnabled && scanResult && shape) {
+      const optimum = findOptimalRotation(shape, stage)
+      setRotationOptimum(optimum)
+      if (optimum.tile_count < optimum.baseline_tile_count) {
+        try {
+          const rotatedShape = getRotatedBoundingRectShape(shape, optimum.angle_deg)
+          const rotated = generateScanGrid(rotatedShape, scanParams, stage)
+          // Only keep rotated result if it actually reduces tile count
+          if (rotated.passes.length < scanResult.passes.length) {
+            setRotatedScanResult(rotated)
+          } else {
+            setRotatedScanResult(null)
+            setRotationTab('current')
+          }
+        } catch {
+          setRotatedScanResult(null)
+        }
+      } else {
+        setRotatedScanResult(null)
+      }
+    } else {
+      setRotationOptimum(null)
+      setRotatedScanResult(null)
+      setRotationTab('current')
+    }
+  }, [rotationOptimizerEnabled, scanResult, shape, stage])
+
   const handleGenerate = () => {
     setLeftOpen(false) // close drawer on mobile when generating
     if (!shape) {
@@ -248,16 +285,6 @@ export default function App() {
     }
   }
 
-  const shapeSummary = (() => {
-    if (!shape) return null
-    if (shape.type === 'rectangle' && shape.rect)
-      return `${fmtDisplay(shape.rect.width, displayUnit, 2)} × ${fmtDisplay(shape.rect.height, displayUnit, 2)}`
-    if (shape.type === 'circle' && shape.circle)
-      return `r = ${fmtDisplay(shape.circle.radius, displayUnit, 2)}`
-    if (shape.type === 'freeform' && shape.freeform)
-      return `${shape.freeform.points.length} pts`
-    return null
-  })()
 
   return (
     <div className="flex flex-col h-screen h-[100dvh] bg-gray-50 dark:bg-[#111] overflow-hidden print:h-auto print:overflow-visible">
@@ -576,17 +603,11 @@ export default function App() {
               hoveredPass={hoveredPass}
               onPassHover={setHoveredPass}
               onShapeChange={handleShapeChange}
+              rotationOptimum={rotationOptimum}
+              rotationTab={rotationTab}
+              rotatedScanResult={rotatedScanResult}
             />
 
-            {/* Status bar */}
-            <div className="absolute bottom-2 left-2 text-[10px] text-gray-400 dark:text-[#888] bg-white/90 dark:bg-[#1e1e1e]/90 border border-gray-200 dark:border-[#333] rounded px-2 py-1 select-none shadow print:hidden">
-              <span className="hidden sm:inline">Scroll</span><span className="sm:hidden">Pinch</span> to zoom · <strong className="text-gray-600 dark:text-[#aaa]">{drawMode}</strong>
-              {shapeSummary && (
-                <span className="ml-2 text-[#4a9eff]">
-                  {shape?.type} · {shapeSummary}
-                </span>
-              )}
-            </div>
           </main>
 
           {/* Mobile results bottom sheet */}
@@ -631,6 +652,12 @@ export default function App() {
                     focusMode={focusMode}
                     hoveredPass={hoveredPass}
                     onPassHover={setHoveredPass}
+                    rotationOptimizerEnabled={rotationOptimizerEnabled}
+                    onRotationOptimizerToggle={setRotationOptimizerEnabled}
+                    rotationOptimum={rotationOptimum}
+                    rotatedScanResult={rotatedScanResult}
+                    activeTab={rotationTab}
+                    onActiveTabChange={setRotationTab}
                   />
                 </div>
               )}
@@ -667,6 +694,12 @@ export default function App() {
                   focusMode={focusMode}
                   hoveredPass={hoveredPass}
                   onPassHover={setHoveredPass}
+                  rotationOptimizerEnabled={rotationOptimizerEnabled}
+                  onRotationOptimizerToggle={setRotationOptimizerEnabled}
+                  rotationOptimum={rotationOptimum}
+                  rotatedScanResult={rotatedScanResult}
+                  activeTab={rotationTab}
+                  onActiveTabChange={setRotationTab}
                 />
               </div>
             )}

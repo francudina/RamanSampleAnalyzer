@@ -61,21 +61,29 @@ function pointInShape(x: number, y: number, shape: SampleShape): boolean {
   return false
 }
 
+export { pointInShape }
+
 // ── Region splitting ───────────────────────────────────────────────────────────
 
 function splitRegion(
   bounds: [number, number, number, number],
   maxW: number,
   maxH: number,
+  tileOverlap: number,
 ): [number, number, number, number][] {
   const [xMin, yMin, xMax, yMax] = bounds
-  const cols = Math.ceil((xMax - xMin) / maxW)
-  const rows = Math.ceil((yMax - yMin) / maxH)
+  // How far to advance the origin between adjacent tiles
+  const stepW = Math.max(1, maxW * (1 - tileOverlap))
+  const stepH = Math.max(1, maxH * (1 - tileOverlap))
+  const sampleW = xMax - xMin
+  const sampleH = yMax - yMin
+  const cols = Math.max(1, Math.ceil(sampleW / stepW))
+  const rows = Math.max(1, Math.ceil(sampleH / stepH))
   const tiles: [number, number, number, number][] = []
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
-      const txMin = xMin + col * maxW
-      const tyMin = yMin + row * maxH
+      const txMin = xMin + col * stepW
+      const tyMin = yMin + row * stepH
       const txMax = Math.min(txMin + maxW, xMax)
       const tyMax = Math.min(tyMin + maxH, yMax)
       tiles.push([txMin, tyMin, txMax, tyMax])
@@ -159,27 +167,37 @@ export function generateScanGrid(
   const totalW = xMax - xMin
   const totalH = yMax - yMin
 
+  const tileOverlap = stage.tile_overlap ?? 0
   const needsSplit = totalW > stage.max_scan_width || totalH > stage.max_scan_height
 
   let regions: [number, number, number, number][]
-  if (needsSplit) {
-    const cols = Math.ceil(totalW / stage.max_scan_width)
-    const rows = Math.ceil(totalH / stage.max_scan_height)
-    warnings.push(
-      `Sample area (${(totalW / 1000).toFixed(2)} mm × ${(totalH / 1000).toFixed(2)} mm) exceeds ` +
+  const splitWarningArea = needsSplit
+    ? `Sample area (${(totalW / 1000).toFixed(2)} mm × ${(totalH / 1000).toFixed(2)} mm) exceeds ` +
       `stage scan limit (${(stage.max_scan_width / 1000).toFixed(0)} mm × ` +
-      `${(stage.max_scan_height / 1000).toFixed(0)} mm). ` +
-      `Scan split into ${cols * rows} passes (${cols} col × ${rows} row). ` +
-      'Reposition the stage between passes.',
-    )
-    regions = splitRegion(bounds, stage.max_scan_width, stage.max_scan_height)
+      `${(stage.max_scan_height / 1000).toFixed(0)} mm). `
+    : null
+  if (needsSplit) {
+    regions = splitRegion(bounds, stage.max_scan_width, stage.max_scan_height, tileOverlap)
   } else {
     regions = [bounds]
   }
 
-  const passes: ScanPass[] = regions.map((region, i) =>
+  const rawPasses: ScanPass[] = regions.map((region, i) =>
     generatePass(i + 1, region, effStepX, effStepY, shape),
   )
+
+  // Remove tiles where no scan point falls inside the shape, then renumber
+  const passes: ScanPass[] = rawPasses
+    .filter((p) => p.total_points > 0)
+    .map((p, i) => ({ ...p, pass_number: i + 1 }))
+
+  if (splitWarningArea) {
+    warnings.push(
+      splitWarningArea +
+      `Scan split into ${passes.length} tile${passes.length !== 1 ? 's' : ''}. ` +
+      'Reposition the stage between tiles.',
+    )
+  }
 
   const totalPoints = passes.reduce((s, p) => s + p.total_points, 0)
   const totalAreaMm2 = passes.reduce((s, p) => s + p.area_mm2, 0)
