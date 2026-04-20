@@ -362,7 +362,7 @@ export default function App() {
             </svg>
           </div>
           <div className="hidden sm:block min-w-0">
-            <h1 className="text-base font-bold text-gray-900 dark:text-[#e0e0e0] truncate">Raman Sample Analyzer <span className="text-[10px] font-normal text-gray-400 dark:text-[#666]">v1.0.0</span></h1>
+            <h1 className="text-base font-bold text-gray-900 dark:text-[#e0e0e0] truncate">Raman Sample Analyzer <span className="text-[10px] font-normal text-gray-400 dark:text-[#666]">v1.1.0</span></h1>
             <a href="https://nioquant.com/" target="_blank" rel="noopener noreferrer" className="hidden md:block text-[10px] text-gray-400 dark:text-[#666] hover:text-[#4a9eff] dark:hover:text-[#4a9eff] transition-colors">by nioquant</a>
           </div>
         </div>
