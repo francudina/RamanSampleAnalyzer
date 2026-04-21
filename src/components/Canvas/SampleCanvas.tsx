@@ -112,6 +112,15 @@ function snapToGrid(um: Point, spacing: number): Point {
 /** Pixel distance within which the cursor snaps to a grid crossing or shape feature. */
 const SNAP_THRESHOLD_PX = 16
 
+/** Closest point (µm) on segment [a→b] to point p. */
+function closestPointOnSegment(p: Point, a: Point, b: Point): Point {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return { x: a.x, y: a.y }
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+  return { x: a.x + t * dx, y: a.y + t * dy }
+}
+
 /** Collect all line-segment edges of a shape as [start, end] µm pairs. */
 function getShapeEdges(shape: SampleShape | null | undefined): [Point, Point][] {
   if (!shape) return []
@@ -132,14 +141,6 @@ function getShapeEdges(shape: SampleShape | null | undefined): [Point, Point][] 
   return []
 }
 
-/** Closest point (µm) on segment [a→b] to point p. */
-function closestPointOnSegment(p: Point, a: Point, b: Point): Point {
-  const dx = b.x - a.x, dy = b.y - a.y
-  const len2 = dx * dx + dy * dy
-  if (len2 === 0) return { x: a.x, y: a.y }
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
-  return { x: a.x + t * dx, y: a.y + t * dy }
-}
 
 /**
  * Returns the best snapped µm point for the cursor position.
@@ -169,27 +170,23 @@ function resolveSnap(
       : { um: raw, snapping: false, snapKind: 'grid' }
   }
 
-  // ── Shape candidates ────────────────────────────────────────────────────────
-  const shapeCandidates: Point[] = []
+  // ── High-priority shape candidates: vertices + grid×edge intersections ──────
+  // These beat the grid snap when within threshold.
+  const highPriCandidates: Point[] = []
 
-  // 1. Shape vertices (start of each edge = all vertices)
-  for (const [a] of edges) shapeCandidates.push(a)
+  // 1. Shape vertices
+  for (const [a] of edges) highPriCandidates.push(a)
 
-  // 2. Closest point on each edge to cursor
-  for (const [a, b] of edges) {
-    shapeCandidates.push(closestPointOnSegment(raw, a, b))
-  }
-
-  // 3. Grid-line × edge cross-section intersections
+  // 2. Grid-line × edge cross-section intersections
   const colN = Math.round(raw.x / spacing)
   for (let n = colN - 1; n <= colN + 1; n++) {
     const gx = n * spacing
     for (const [a, b] of edges) {
       const dxAB = b.x - a.x
-      if (Math.abs(dxAB) < 1e-12) continue // edge is vertical — no unique solution
+      if (Math.abs(dxAB) < 1e-12) continue
       const t = (gx - a.x) / dxAB
       if (t < 0 || t > 1) continue
-      shapeCandidates.push({ x: gx, y: a.y + t * (b.y - a.y) })
+      highPriCandidates.push({ x: gx, y: a.y + t * (b.y - a.y) })
     }
   }
   const rowN = Math.round(raw.y / spacing)
@@ -197,36 +194,45 @@ function resolveSnap(
     const gy = n * spacing
     for (const [a, b] of edges) {
       const dyAB = b.y - a.y
-      if (Math.abs(dyAB) < 1e-12) continue // edge is horizontal — no unique solution
+      if (Math.abs(dyAB) < 1e-12) continue
       const t = (gy - a.y) / dyAB
       if (t < 0 || t > 1) continue
-      shapeCandidates.push({ x: a.x + t * (b.x - a.x), y: gy })
+      highPriCandidates.push({ x: a.x + t * (b.x - a.x), y: gy })
     }
   }
 
-  // Best shape candidate (closest to cursor)
-  let bestShapePt: Point | null = null
-  let bestShapeDist = Infinity
-  for (const pt of shapeCandidates) {
+  let bestHighPt: Point | null = null
+  let bestHighDist = Infinity
+  for (const pt of highPriCandidates) {
     const d = Math.hypot(
       umToPixel(pt.x, vp.left, vp.scale) - pos.x,
       umToPixel(pt.y, vp.top, vp.scale) - pos.y,
     )
-    if (d < bestShapeDist) { bestShapeDist = d; bestShapePt = pt }
+    if (d < bestHighDist) { bestHighDist = d; bestHighPt = pt }
   }
 
-  // ── Pick winner ─────────────────────────────────────────────────────────────
-  const shapeWins = bestShapePt !== null && bestShapeDist < SNAP_THRESHOLD_PX
-  const gridWins  = gridDistPx < SNAP_THRESHOLD_PX
-
-  if (shapeWins && gridWins) {
-    // Prefer shape when it's no more than 4 px farther than the grid
-    return bestShapeDist <= gridDistPx + 4
-      ? { um: bestShapePt!, snapping: true, snapKind: 'shape' }
-      : { um: gridSnapped,  snapping: true, snapKind: 'grid'  }
+  // High-priority shape point wins over grid (both within threshold)
+  if (bestHighPt !== null && bestHighDist < SNAP_THRESHOLD_PX) {
+    return { um: bestHighPt, snapping: true, snapKind: 'shape' }
   }
-  if (shapeWins) return { um: bestShapePt!, snapping: true, snapKind: 'shape' }
-  if (gridWins)  return { um: gridSnapped,  snapping: true, snapKind: 'grid'  }
+
+  // Grid wins next
+  if (gridDistPx < SNAP_THRESHOLD_PX) {
+    return { um: gridSnapped, snapping: true, snapKind: 'grid' }
+  }
+
+  // ── Low-priority: continuous edge snap (only when no grid nearby) ────────────
+  for (const [a, b] of edges) {
+    const cp = closestPointOnSegment(raw, a, b)
+    const dPx = Math.hypot(
+      umToPixel(cp.x, vp.left, vp.scale) - pos.x,
+      umToPixel(cp.y, vp.top, vp.scale) - pos.y,
+    )
+    if (dPx < SNAP_THRESHOLD_PX) {
+      return { um: cp, snapping: true, snapKind: 'shape' }
+    }
+  }
+
   return { um: raw, snapping: false, snapKind: 'grid' }
 }
 
