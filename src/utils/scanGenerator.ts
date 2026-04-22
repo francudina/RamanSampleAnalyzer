@@ -166,7 +166,7 @@ function signedArea(pts: Point[]): number {
   return area / 2
 }
 
-function insetPolygon(pts: Point[], offset: number): Point[] {
+export function insetPolygon(pts: Point[], offset: number): Point[] {
   const n = pts.length
   if (n < 3) return pts
   // Ensure CCW winding so left-normals point inward

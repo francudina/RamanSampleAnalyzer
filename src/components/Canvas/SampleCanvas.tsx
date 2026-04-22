@@ -32,6 +32,7 @@ import {
   umToPixel,
   zoomViewport,
 } from '../../utils/geometry'
+import { insetPolygon } from '../../utils/scanGenerator'
 import { type DisplayUnit, fmtAreaDisplay, fmtDisplay, umToDisplay } from '../../utils/units'
 
 // Pass colours for multi-pass scans
@@ -82,6 +83,7 @@ interface Props {
   onRegisterSnapshot: (fn: () => SnapshotInfo | null) => void
   frameEnabled?: boolean
   frameSegments?: FrameSegment[]
+  innerOffsetUm?: number
 }
 
 // ── Grid lines helper ──────────────────────────────────────────────────────────
@@ -300,9 +302,11 @@ function CoordGrid({ vp, width, height, darkMode }: { vp: Viewport; width: numbe
 function ShapeRenderer({
   shape,
   vp,
+  innerOffsetUm = 0,
 }: {
   shape: SampleShape
   vp: Viewport
+  innerOffsetUm?: number
 }) {
   const toX = (um: number) => umToPixel(um, vp.left, vp.scale)
   const toY = (um: number) => umToPixel(um, vp.top, vp.scale)
@@ -327,6 +331,21 @@ function ShapeRenderer({
           strokeWidth={1.5}
           listening={false}
         />
+        {/* Inner offset boundary */}
+        {innerOffsetUm > 0 && r.width > 2 * innerOffsetUm && r.height > 2 * innerOffsetUm && (
+          <Rect
+            x={toX(r.x + innerOffsetUm)}
+            y={toY(r.y + innerOffsetUm)}
+            width={(r.width - 2 * innerOffsetUm) * vp.scale}
+            height={(r.height - 2 * innerOffsetUm) * vp.scale}
+            fill="transparent"
+            stroke="#2563eb"
+            strokeWidth={1}
+            dash={[4, 4]}
+            opacity={0.5}
+            listening={false}
+          />
+        )}
         {/* Segment labels — pushed to outside of shape */}
         {(() => {
           const centX = pts.reduce((s, p) => s + toX(p.x), 0) / pts.length
@@ -397,22 +416,42 @@ function ShapeRenderer({
 
   if (shape.type === 'circle' && shape.circle) {
     const c = shape.circle
+    const insetR = c.radius - innerOffsetUm
     return (
-      <Circle
-        x={toX(c.cx)}
-        y={toY(c.cy)}
-        radius={c.radius * vp.scale}
-        fill="rgba(59,130,246,0.10)"
-        stroke="#2563eb"
-        strokeWidth={1.5}
-        listening={false}
-      />
+      <>
+        <Circle
+          x={toX(c.cx)}
+          y={toY(c.cy)}
+          radius={c.radius * vp.scale}
+          fill="rgba(59,130,246,0.10)"
+          stroke="#2563eb"
+          strokeWidth={1.5}
+          listening={false}
+        />
+        {innerOffsetUm > 0 && insetR > 0 && (
+          <Circle
+            x={toX(c.cx)}
+            y={toY(c.cy)}
+            radius={insetR * vp.scale}
+            fill="transparent"
+            stroke="#2563eb"
+            strokeWidth={1}
+            dash={[4, 4]}
+            opacity={0.5}
+            listening={false}
+          />
+        )}
+      </>
     )
   }
 
   if (shape.type === 'freeform' && shape.freeform) {
     const pts = shape.freeform.points
     const flatPts = pts.flatMap((p) => [toX(p.x), toY(p.y)])
+    const insetPts = innerOffsetUm > 0 && pts.length >= 3
+      ? insetPolygon(pts, innerOffsetUm)
+      : null
+    const flatInset = insetPts?.flatMap((p) => [toX(p.x), toY(p.y)])
     return (
       <>
         {/* Filled polygon */}
@@ -424,6 +463,19 @@ function ShapeRenderer({
           strokeWidth={1.5}
           listening={false}
         />
+        {/* Inner offset boundary */}
+        {flatInset && flatInset.length >= 6 && (
+          <Line
+            points={flatInset}
+            closed
+            fill="transparent"
+            stroke="#2563eb"
+            strokeWidth={1}
+            dash={[4, 4]}
+            opacity={0.5}
+            listening={false}
+          />
+        )}
         {/* Segment labels — pushed to outside of polygon */}
         {(() => {
           const centX = pts.reduce((s, p) => s + toX(p.x), 0) / pts.length
@@ -1237,6 +1289,7 @@ export default function SampleCanvas({
   onRegisterSnapshot,
   frameEnabled,
   frameSegments,
+  innerOffsetUm = 0,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 800, h: 600 })
@@ -1982,7 +2035,7 @@ export default function SampleCanvas({
         {/* Content layer — shapes, grid, drawing */}
         <Layer listening={focusMode}>
           {/* Sample shape — hidden while the user is actively editing it as freeform */}
-          {shape && drawState.mode !== 'drawing_freeform' && <ShapeRenderer shape={shape} vp={vp} />}
+          {shape && drawState.mode !== 'drawing_freeform' && <ShapeRenderer shape={shape} vp={vp} innerOffsetUm={innerOffsetUm} />}
 
           {/* Exclusion zones */}
           <ExclusionZoneRenderer zones={exclusionZones} vp={vp} />

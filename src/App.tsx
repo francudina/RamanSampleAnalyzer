@@ -839,6 +839,7 @@ export default function App() {
               onRegisterSnapshot={handleRegisterSnapshot}
               frameEnabled={frameEnabled}
               frameSegments={frameSegments}
+              innerOffsetUm={innerOffsetUm}
             />
 
           </main>
